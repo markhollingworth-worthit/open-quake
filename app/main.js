@@ -97,7 +97,7 @@ app.whenReady().then(() => {
 
   placePanel();
   dev.on('touch', pts => { if (panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('touch', pts); });
-  dev.on('knob', k => { console.log('knob', Date.now() % 100000, JSON.stringify(k)); if (panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('knob', k); }); // panel owns knob logic
+  dev.on('knob', k => { if (panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('knob', k); }); // panel owns knob logic
   dev.on('connect', i => console.log('connect:', i.iface));
   dev.on('error', e => console.log('dev error:', e.message));
   dev.start();
