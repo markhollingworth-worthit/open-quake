@@ -5,6 +5,10 @@ An open driver and touchscreen launcher for the **DK-QUAKE / ARIS-68** — the
 DK-Suite app). `open-quake` talks to it directly over HID, with no vendor
 software running.
 
+![open-quake on the DK-QUAKE — launcher, flip clock, message board, and a Home Assistant dashboard](docs/showcase.png)
+
+### **[⬇ Download for Windows](https://github.com/TeeJS/open-quake/releases/latest)** &nbsp;·&nbsp; or build from source (below)
+
 It gives you:
 
 - **A multi-grid launcher** — each page is a grid of tiles; tap a tile to open an
