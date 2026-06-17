@@ -1,6 +1,6 @@
 'use strict';
 // DK-QUAKE launcher: multi-grid panel + PC config editor, on the open Aris68Connector driver.
-const { app, BrowserWindow, screen, powerSaveBlocker, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, screen, powerSaveBlocker, ipcMain, shell, dialog, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { exec } = require('child_process');
@@ -20,9 +20,20 @@ const dev = new Aris68Connector({ hid: HID });
 function loadConfig() {
   try {
     if (!fs.existsSync(CONFIG_PATH) && fs.existsSync(DEFAULT_CONFIG_PATH)) fs.copyFileSync(DEFAULT_CONFIG_PATH, CONFIG_PATH);
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    return migrateConfig(JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')));
   } catch (e) { console.log('config load error:', e.message); return { activeGridId: null, grids: [] }; }
 }
+// Normalize dashboard auth: fold the old per-page `haToken` into the typed `auth` object.
+function migrateConfig(c) {
+  (c.grids || []).forEach(g => {
+    if (g.kind === 'web') {
+      if (!g.auth) g.auth = g.haToken ? { type: 'ha', token: g.haToken } : { type: 'none' };
+      delete g.haToken;
+    }
+  });
+  return c;
+}
+function hostMatches(a, b) { try { return new URL(a).host === new URL(b).host; } catch (e) { return false; } }
 function saveConfig() { try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2)); } catch (e) { console.log('config save error:', e.message); } }
 function activeGrid() { return config.grids.find(g => g.id === config.activeGridId) || config.grids[0] || { cols: 8, rows: 2, tiles: [] }; }
 function gridList() { return config.grids.map(g => ({ id: g.id, name: g.name })); }
@@ -118,6 +129,29 @@ function openConfigWindow() {
 
 app.whenReady().then(() => {
   try { powerSaveBlocker.start('prevent-display-sleep'); } catch (e) {}
+
+  // Dashboard auth injection for the webview session. The active page's auth config drives it:
+  //  - 'header'  -> add custom header(s) to requests to the dashboard host (bearer / Cloudflare Access / …)
+  //  - 'basic'   -> answer HTTP Basic Auth challenges with the configured user/pass
+  // ('ha' token injection is done renderer-side; 'none' does nothing.)
+  const dashSession = session.fromPartition('persist:dashboards');
+  dashSession.webRequest.onBeforeSendHeaders((details, cb) => {
+    const g = activeGrid();
+    if (g && g.kind === 'web' && g.auth && g.auth.type === 'header' && hostMatches(g.url, details.url)) {
+      const h = details.requestHeaders;
+      (g.auth.headers || []).forEach(x => { if (x.name) h[x.name] = x.value; });
+      return cb({ requestHeaders: h });
+    }
+    cb({});
+  });
+  app.on('login', (event, webContents, request, authInfo, callback) => {
+    if (authInfo.isProxy) return;
+    const g = activeGrid();
+    if (g && g.kind === 'web' && g.auth && g.auth.type === 'basic' && hostMatches(g.url, request.url)) {
+      event.preventDefault();
+      callback(g.auth.user || '', g.auth.pass || '');
+    }
+  });
 
   ipcMain.on('launch', (e, a) => runAction(a));
   ipcMain.on('volume', (e, v) => { if (robot) { try { if (v === 'mute') robot.keyTap('audio_mute'); else robot.keyTap(v > 0 ? 'audio_vol_up' : 'audio_vol_down'); } catch (er) {} } });

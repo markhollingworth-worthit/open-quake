@@ -258,16 +258,60 @@
     document.getElementById('tilegrid').innerHTML = '';
     document.getElementById('tileform').innerHTML = '';
     document.getElementById('iconpane').innerHTML = '';
+    if (!g.auth) g.auth = g.haToken ? { type: 'ha', token: g.haToken } : { type: 'none' };
+    delete g.haToken;
     const el = document.getElementById('gridmeta');
     el.innerHTML = `
       <div class="row"><label>Name</label><input id="gName" value="${esc(g.name)}"></div>
       <div class="row"><label>URL</label><input id="gUrl" value="${esc(g.url)}" placeholder="https://…  (dashboard, monitoring page, etc.)"></div>
-      <div class="row"><button id="gActive">Show on panel</button><button class="danger" id="gDelete">Delete page</button></div>
-      <p class="hint">Shown full-screen on the panel. On the device: knob scrolls · tap clicks · double-click the knob to return to the page selector.</p>`;
+      <div class="row"><label>Auth</label><select id="gAuth">
+        <option value="none" ${g.auth.type === 'none' ? 'selected' : ''}>None</option>
+        <option value="ha" ${g.auth.type === 'ha' ? 'selected' : ''}>Home Assistant token</option>
+        <option value="basic" ${g.auth.type === 'basic' ? 'selected' : ''}>HTTP Basic Auth</option>
+        <option value="header" ${g.auth.type === 'header' ? 'selected' : ''}>Custom header(s)</option>
+      </select></div>
+      <div id="authFields"></div>
+      <div class="row" style="margin-top:10px"><button id="gActive">Show on panel</button><button class="danger" id="gDelete">Delete page</button></div>
+      <p class="hint" id="authHint"></p>
+      <p class="hint">Shown full-screen on the panel. Knob scrolls · tap clicks · double-click the knob returns to the page selector.</p>`;
     document.getElementById('gName').oninput = e => { g.name = e.target.value; renderGrids(); markDirty(); };
     document.getElementById('gUrl').oninput = e => { g.url = e.target.value; markDirty(); };
+    document.getElementById('gAuth').onchange = e => { setAuthType(g, e.target.value); renderAuthFields(g); markDirty(); };
     document.getElementById('gActive').onclick = () => { config.activeGridId = g.id; renderGrids(); markDirty(); };
     document.getElementById('gDelete').onclick = deleteCurrentPage;
+    renderAuthFields(g);
+  }
+  function setAuthType(g, type) {
+    if (type === 'ha') g.auth = { type: 'ha', token: (g.auth && g.auth.token) || '' };
+    else if (type === 'basic') g.auth = { type: 'basic', user: (g.auth && g.auth.user) || '', pass: (g.auth && g.auth.pass) || '' };
+    else if (type === 'header') g.auth = { type: 'header', headers: (g.auth && g.auth.headers && g.auth.headers.length) ? g.auth.headers : [{ name: '', value: '' }] };
+    else g.auth = { type: 'none' };
+  }
+  function renderAuthFields(g) {
+    const el = document.getElementById('authFields'), hint = document.getElementById('authHint');
+    const t = g.auth.type;
+    if (t === 'ha') {
+      el.innerHTML = `<div class="row"><label>Token</label><input id="aTok" type="password" value="${esc(g.auth.token)}" placeholder="long-lived access token"></div>`;
+      document.getElementById('aTok').oninput = e => { g.auth.token = e.target.value; markDirty(); };
+      hint.innerHTML = '<b>Home Assistant</b> (no keyboard on the panel): profile → Security → Long-Lived Access Tokens → Create, paste above. The panel signs in automatically.';
+    } else if (t === 'basic') {
+      el.innerHTML = `<div class="row"><label>User</label><input id="aUser" value="${esc(g.auth.user)}"></div>
+        <div class="row"><label>Password</label><input id="aPass" type="password" value="${esc(g.auth.pass)}"></div>`;
+      document.getElementById('aUser').oninput = e => { g.auth.user = e.target.value; markDirty(); };
+      document.getElementById('aPass').oninput = e => { g.auth.pass = e.target.value; markDirty(); };
+      hint.innerHTML = 'Sent as an HTTP Basic Auth header to the dashboard host (common behind nginx / a reverse proxy).';
+    } else if (t === 'header') {
+      el.innerHTML = g.auth.headers.map((h, i) => `<div class="row"><input class="aHN" data-i="${i}" value="${esc(h.name)}" placeholder="Header name" style="flex:2"><input class="aHV" data-i="${i}" type="password" value="${esc(h.value)}" placeholder="value" style="flex:3"><button class="aHD" data-i="${i}" title="remove">✕</button></div>`).join('')
+        + `<div class="row"><button id="aHAdd">+ header</button></div>`;
+      el.querySelectorAll('.aHN').forEach(x => x.oninput = e => { g.auth.headers[+e.target.dataset.i].name = e.target.value; markDirty(); });
+      el.querySelectorAll('.aHV').forEach(x => x.oninput = e => { g.auth.headers[+e.target.dataset.i].value = e.target.value; markDirty(); });
+      el.querySelectorAll('.aHD').forEach(b => b.onclick = e => { g.auth.headers.splice(+e.currentTarget.dataset.i, 1); if (!g.auth.headers.length) g.auth.headers.push({ name: '', value: '' }); renderAuthFields(g); markDirty(); });
+      document.getElementById('aHAdd').onclick = () => { g.auth.headers.push({ name: '', value: '' }); renderAuthFields(g); markDirty(); };
+      hint.innerHTML = 'Header(s) added to requests to the dashboard host — e.g. <code>Authorization: Bearer …</code>, or Cloudflare Access <code>CF-Access-Client-Id</code> + <code>CF-Access-Client-Secret</code>.';
+    } else {
+      el.innerHTML = '';
+      hint.innerHTML = 'No authentication — for public pages or anonymous-access dashboards.';
+    }
   }
   function deleteCurrentPage() {
     if (config.grids.length <= 1) return;
@@ -285,7 +329,7 @@
 
   function addPage(kind) {
     let g;
-    if (kind === 'web') g = { id: uid(), name: 'Dashboard', kind: 'web', url: '' };
+    if (kind === 'web') g = { id: uid(), name: 'Dashboard', kind: 'web', url: '', auth: { type: 'none' } };
     else { g = { id: uid(), name: 'New Grid', kind: 'grid', cols: 8, rows: 2, tiles: [] }; ensureTiles(g); }
     config.grids.push(g); gi = config.grids.length - 1; ti = -1; render(); markDirty();
   }

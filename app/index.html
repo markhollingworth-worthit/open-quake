@@ -54,7 +54,17 @@
   let armed = false, idleT = null, lastHit = -1, volT = null;
   let selOpen = false, selIdx = 0, selAutoClose = null;
   let webMode = false, curUrl = '', webReady = false, webDown = false, lastWeb = { x: 0, y: 0 }, webIdle = null;
+  let haToken = '', haInject = false;
   web.addEventListener('dom-ready', () => { webReady = true; });
+  // Home Assistant has no keyboard on the panel — if a long-lived token is set, seed HA's auth into
+  // localStorage so it loads signed-in, then reload into the dashboard. (Standard HA kiosk technique.)
+  web.addEventListener('did-finish-load', () => {
+    if (!haInject || !haToken) return;
+    haInject = false;
+    let origin = ''; try { origin = new URL(curUrl).origin; } catch (e) { return; }
+    const tok = { access_token: haToken, token_type: 'Bearer', expires_in: 315360000, hassUrl: origin, clientId: null, expires: Date.now() + 315360000000, refresh_token: '' };
+    web.executeJavaScript(`try{localStorage.setItem('hassTokens', ${JSON.stringify(JSON.stringify(tok))});location.replace(${JSON.stringify(curUrl)});}catch(e){}`).catch(() => {});
+  });
 
   // ---- active grid ----
   function build() {
@@ -75,8 +85,10 @@
     cfg = g;
     if (g && g.kind === 'web') {            // dashboard page -> show the webview
       webMode = true; grid.style.display = 'none'; web.classList.add('show');
+      const auth = g.auth || {};
+      haToken = auth.type === 'ha' ? (auth.token || '') : '';   // HA seeds localStorage; basic/header handled in main
       const url = g.url || 'about:blank';
-      if (url !== curUrl) { curUrl = url; webReady = false; web.src = url; }
+      if (url !== curUrl) { curUrl = url; webReady = false; haInject = !!haToken; web.src = url; }
     } else {                                // tile grid
       webMode = false; web.classList.remove('show'); grid.style.display = 'grid'; build();
     }

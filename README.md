@@ -12,7 +12,9 @@ It gives you:
   can be an emoji, the program's own icon, or a custom image.
 - **Web dashboard pages** — a page can instead be a live web view (Home Assistant,
   Grafana / server monitoring, a status page, …) shown full-screen on the panel:
-  the knob scrolls it, a tap clicks, and logins persist across restarts.
+  the knob scrolls it, a tap clicks, and logins persist across restarts. Pages that
+  need auth can inject a Home Assistant long-lived token, HTTP Basic Auth, or custom
+  header(s) (bearer / Cloudflare Access) — set per page in the editor.
 - **Knob control** — rotate for volume (or to scroll the current dashboard),
   single-click to mute, **double-click to open the page selector** (rotate to
   pick a page by name, press to switch).
