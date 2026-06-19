@@ -1,0 +1,135 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Music</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 100%; height: 100%; }
+  body { background: #05080d; color: #e8eef6; overflow: hidden; user-select: none;
+    font-family: "Segoe UI", system-ui, sans-serif; }
+  /* rule-of-thirds: art anchored left edge | now-playing + transport fill the middle band | grid anchored right edge */
+  #wrap { display: flex; width: 100vw; height: 100vh; padding: 26px; align-items: stretch; }
+  .art-col { flex: 1; display: flex; align-items: center; justify-content: flex-start; }
+  .mid { flex: 1.45; min-width: 0; display: flex; flex-direction: column; justify-content: space-evenly; gap: 28px; padding: 30px 46px; }
+  .grid-col { flex: 1; display: flex; align-items: center; justify-content: flex-end; }
+
+  /* album art (placeholder until the SMTC .NET art helper lands) */
+  .art { height: 100%; aspect-ratio: 1/1; border-radius: 18px; position: relative; overflow: hidden;
+    background: linear-gradient(160deg, #11202e, #0a1119); border: 1px solid #1a2738;
+    display: flex; align-items: center; justify-content: center; }
+  .art .note { font-size: 150px; opacity: .22; }
+  .art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: none; }
+
+  .title { font-size: 52px; font-weight: 800; line-height: 1.12; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .artist { font-size: 32px; color: #9fb3c8; margin-top: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .status { display: flex; align-items: center; gap: 12px; margin-top: 26px; font-size: 19px; color: #7e93ab; }
+  .status .pill { padding: 4px 14px; border-radius: 20px; background: #16202e; color: #7CFFB2; font-weight: 700; letter-spacing: .5px; }
+  .controls { display: flex; align-items: center; justify-content: space-between; }
+  .btn { width: 92px; height: 92px; border-radius: 50%; border: 1px solid #243345; cursor: pointer; color: #e8eef6;
+    background: linear-gradient(160deg, #101a26, #0a1119); display: flex; align-items: center; justify-content: center;
+    transition: transform .08s ease; }
+  .btn:active { transform: scale(.92); }
+  .btn svg { width: 42%; height: 42%; fill: currentColor; }
+  .btn.play { width: 116px; height: 116px; color: #04121f; background: linear-gradient(160deg, #1db96a, #0f8f4f); border-color: #7CFFB2; }
+
+  /* right: the programmable 2x2 grid — a square block with square tiles, matching the Default grid */
+  .grid { flex: none; height: 100%; aspect-ratio: 1; display: grid; gap: 16px; }
+  .tile { border-radius: 16px; border: 1px solid #1a2738; cursor: pointer; overflow: hidden;
+    background: linear-gradient(160deg, #0e1a26, #0a1119); display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 8px; transition: transform .08s ease; }
+  .tile:active { transform: scale(.97); }
+  .tile .ic { font-size: 52px; line-height: 1; }
+  .tile .ic img { width: 60px; height: 60px; object-fit: contain; }
+  .tile .lb { font-size: 20px; color: #c7d4e2; font-weight: 600; padding: 0 8px; text-align: center;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .tile.empty { background: #0a0f16; border-style: dashed; border-color: #141c28; cursor: default; }
+
+  #recon { position: fixed; right: 14px; bottom: 10px; font-size: 12px; color: #c98; opacity: 0; transition: opacity .3s; }
+  #recon.show { opacity: 1; }
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <div class="art-col"><div class="art"><div class="note">🎵</div><img id="artImg"></div></div>
+    <div class="mid">
+      <div>
+        <div class="title" id="mTitle">Nothing playing</div>
+        <div class="artist" id="mArtist">—</div>
+        <div class="status"><span class="pill" id="mStatus">—</span><span id="mApp"></span></div>
+      </div>
+      <div class="controls">
+        <div class="btn" id="bPrev"></div>
+        <div class="btn play" id="bPlay"></div>
+        <div class="btn" id="bNext"></div>
+        <div class="btn" id="bStop"></div>
+      </div>
+    </div>
+    <div class="grid-col"><div class="grid" id="grid"></div></div>
+  </div>
+  <div id="recon">reconnecting…</div>
+
+<script>
+  function $(id){ return document.getElementById(id); }
+  function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  var ICON = {
+    prev: '<svg viewBox="0 0 24 24"><path d="M7 6h2.4v12H7z"/><path d="M20 6v12l-9-6z"/></svg>',
+    next: '<svg viewBox="0 0 24 24"><path d="M14.6 6H17v12h-2.4z"/><path d="M4 6v12l9-6z"/></svg>',
+    play: '<svg viewBox="0 0 24 24"><path d="M7 5l12 7-12 7z"/></svg>',
+    pause:'<svg viewBox="0 0 24 24"><path d="M6 5h4.2v14H6z"/><path d="M13.8 5H18v14h-4.2z"/></svg>',
+    stop: '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>'
+  };
+  $('bPrev').innerHTML = ICON.prev; $('bNext').innerHTML = ICON.next; $('bStop').innerHTML = ICON.stop; $('bPlay').innerHTML = ICON.pause;
+  function media(cmd){ fetch('/media/' + cmd, { cache: 'no-store' }).catch(function(){}); }
+  $('bPrev').onclick = function(){ media('prev'); };
+  $('bNext').onclick = function(){ media('next'); };
+  $('bStop').onclick = function(){ media('stop'); };
+  $('bPlay').onclick = function(){ media('playpause'); var p = $('bPlay').innerHTML === ICON.pause; $('bPlay').innerHTML = p ? ICON.play : ICON.pause; };
+
+  function renderNP(s){
+    if (!s || !s.title){
+      $('mTitle').textContent = 'Nothing playing'; $('mArtist').textContent = '—';
+      $('mStatus').textContent = '—'; $('mApp').textContent = ''; $('bPlay').innerHTML = ICON.play; return;
+    }
+    $('mTitle').textContent = s.title;
+    $('mArtist').textContent = s.artist || '—';
+    $('mStatus').textContent = s.status || '—';
+    $('bPlay').innerHTML = (s.status === 'Playing') ? ICON.pause : ICON.play;
+    var app = (s.app || '').replace(/\._crx_.*/, '').replace(/!.*/, '').replace(/\.exe$/i, '');
+    $('mApp').textContent = app ? ('· ' + app) : '';
+  }
+
+  function renderGrid(d){
+    var host = $('grid'), cols = d.cols || 2, rows = d.rows || 2, n = cols * rows, tiles = d.tiles || [];
+    host.style.gridTemplateColumns = 'repeat(' + cols + ',1fr)';
+    host.style.gridTemplateRows = 'repeat(' + rows + ',1fr)';
+    var html = '';
+    for (var i = 0; i < n; i++){
+      var t = tiles[i];
+      if (t && t.type && t.cover == null){
+        var ic = t.iconSrc ? '<div class="ic"><img src="' + t.iconSrc + '"></div>' : '<div class="ic">' + (t.icon || '▫️') + '</div>';
+        html += '<div class="tile" data-i="' + i + '">' + ic + '<div class="lb">' + esc(t.label || '') + '</div></div>';
+      } else {
+        html += '<div class="tile empty"></div>';
+      }
+    }
+    host.innerHTML = html;
+    host.querySelectorAll('.tile[data-i]').forEach(function(el){
+      el.onclick = function(){ fetch('/launch?i=' + el.getAttribute('data-i'), { cache: 'no-store' }).catch(function(){}); };
+    });
+  }
+
+  function pollNP(){
+    fetch('/nowplaying', { cache: 'no-store' }).then(function(r){ return r.json(); })
+      .then(function(s){ $('recon').classList.remove('show'); renderNP(s); })
+      .catch(function(){ $('recon').classList.add('show'); });
+  }
+  function pollGrid(){
+    fetch('/musictiles', { cache: 'no-store' }).then(function(r){ return r.json(); }).then(renderGrid).catch(function(){});
+  }
+  pollNP(); pollGrid();
+  setInterval(pollNP, 1500);
+  setInterval(pollGrid, 3000);   // pick up edits made in the editor
+</script>
+</body>
+</html>

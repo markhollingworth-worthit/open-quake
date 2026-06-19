@@ -135,12 +135,34 @@ no server and no hand-typed URLs.
 Included: **Flip Clock** — split-flap animation, 12/24-hour, dark/classic theme,
 optional seconds, and a corner date/day. (12-hour shows a single hour card with an
 AM/PM badge; 24-hour shows two hour cards.) It ships **enabled by default** (12-hour).
+Also included: the **Music** controller (see [Music controller](#music-controller)).
 
 ![Configuring the Flip Clock app in the editor](docs/shots/editor-clock.png)
 
 Write your own: drop an HTML file in `apps/` that reads its settings from the URL
 **hash** (e.g. `…/myapp.html#color=red`) — a `?query` doesn't survive a `file://`
 load — and add an entry to `apps/apps.json` describing its options.
+
+## Music controller
+
+A built-in **Music** app shows what's playing on your PC — title, artist, and play state —
+with big touch **transport controls** (play/pause, next, previous, stop), plus a programmable
+**2×2 app-launcher grid** on the right (Spotify, YouTube Music, Apple Music, Tidal by default).
+It's added on first run; like any app you can delete it (it stays gone) or add more via **+ App**.
+
+- **Now-playing** is read from the Windows media flyout (System Media Transport Controls), so it's
+  **app-agnostic** — and the transport buttons send standard media keys, controlling whatever's playing.
+- **The 2×2 grid is a real, editable grid** — open the Music app in the editor and program its tiles
+  exactly like the Default/Media/Dev grids; each tile opens a URL in your PC browser or launches an app,
+  same as any tile. (This is the "grid embedded in an app" capability — apps can carry their own grid.)
+- **No admin, no extra software.**
+
+**Works with** anything that appears in the Windows media flyout — tested with Spotify, YouTube Music,
+Music Assistant, Amazon Music, Tidal, Apple Music (web), SoundCloud, Bandcamp, and Plex (web). Browser
+players generally "just work" via the browser's media-session integration. A few desktop apps don't
+register with the flyout and so won't show now-playing or respond to the buttons (e.g. **VLC**, **Plexamp**).
+
+*(Album art is a planned follow-up — the media-flyout thumbnail needs a small helper to extract.)*
 
 ## System monitor (SystemView)
 
@@ -212,8 +234,10 @@ app/                      the Electron launcher + PC grid editor     [MIT]
   config.html             the PC editor (pages, tiles, icons)
   config.default.json     seed config (copied to config.json on first run)
   sysmetrics.js           SystemView: live host metrics (systeminformation + GPU counters)
-  sysserver.js            SystemView: localhost metrics server (page + /metrics JSON)
+  nowplaying.js           Music: now-playing from Windows SMTC (via PowerShell)
+  sysserver.js            localhost server for the SystemView + Music app pages
   sysview.html            SystemView: the on-panel system-monitor dashboard
+  musicview.html          Music: now-playing + transport + the embedded app grid
 apps/                     bundled local web apps + apps.json manifest [MIT]
 ```
 

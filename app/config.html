@@ -206,8 +206,10 @@
     const g = curGrid(); const el = document.getElementById('tilegrid');
     if (!g) { el.innerHTML = ''; return; }
     ensureTiles(g);
-    el.style.gridTemplateColumns = `repeat(${g.cols}, 1fr)`;
-    el.style.gridTemplateRows = `repeat(${g.rows}, 64px)`;
+    const cw = el.clientWidth || el.parentElement && el.parentElement.clientWidth || 600;
+    const cell = Math.max(48, Math.min(150, Math.floor((cw - (g.cols - 1) * 6) / g.cols)));   // SQUARE cells, so the editor preview matches the panel's square tiles (capped so big grids don't overflow)
+    el.style.gridTemplateColumns = `repeat(${g.cols}, ${cell}px)`;
+    el.style.gridTemplateRows = `repeat(${g.rows}, ${cell}px)`;
     el.innerHTML = '';
     const rect = selRect(g);
     g.tiles.forEach((t, i) => {
@@ -466,11 +468,9 @@
   // ---- app page ----
   function renderAppPage() {
     const g = curGrid();
-    document.getElementById('tilegrid').innerHTML = '';
-    document.getElementById('mergebar').innerHTML = '';
-    document.getElementById('tileform').innerHTML = '';
-    document.getElementById('iconpane').innerHTML = '';
     const def = appDefs.find(a => a.id === g.app);
+    // Apps that embed a programmable grid (def.grid) keep the tile editor populated; render() fills it.
+    if (!(def && def.grid)) ['tilegrid', 'mergebar', 'tileform', 'iconpane'].forEach(id => { document.getElementById(id).innerHTML = ''; });
     const el = document.getElementById('gridmeta');
     el.innerHTML = `
       <div class="row"><label>Name</label><input id="gName" value="${esc(g.name)}"></div>
@@ -496,6 +496,10 @@
     if (def) {
       def.options.forEach(o => { g.options[o.key] = o.default; });
       if (!g.name || g.name === 'App' || (prev && g.name === prev.name)) g.name = def.name;  // auto-name from the app
+      if (def.grid) {                                       // app embeds a programmable tile grid — seed it
+        g.cols = def.grid.cols || 2; g.rows = def.grid.rows || 2;
+        if (!Array.isArray(g.tiles) || !g.tiles.length) g.tiles = (def.grid.defaults || []).map(t => Object.assign({}, t));
+      }
     }
   }
   function renderAppOpts(g, def) {
@@ -527,7 +531,7 @@
     if (view === 'settings') { renderSettings(); return; }
     const g = curGrid();
     if (g && g.kind === 'web') renderDashboard();
-    else if (g && g.kind === 'app') renderAppPage();
+    else if (g && g.kind === 'app') { renderAppPage(); const def = appDefs.find(a => a.id === g.app); if (def && def.grid) { renderTiles(); renderForm(); } }   // app with an embedded grid -> show the tile editor too
     else { renderMeta(); renderTiles(); renderForm(); }
   }
 

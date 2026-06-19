@@ -21,7 +21,8 @@ let micState = false;     // current device mic state (LED follows it)
 let lastRingEffect = LED_DEFAULT.effect; // remembered so the tray on/off toggle can restore the prior effect
 let rotateRunning = false;               // screen-rotation runtime on/off (starts per settings on launch)
 let rotTimer = null;
-let sysserver = null;                    // SystemView local metrics server (lazy-required in whenReady)
+let sysserver = null;                    // SystemView/Music local server (lazy-required in whenReady)
+let serverPort = 0;                      // the local server's ephemeral port (for music-page routing)
 let config = loadConfig();
 let panelWin = null, configWin = null, tray = null;
 const dev = new Aris68Connector({ hid: HID });
@@ -66,6 +67,40 @@ function ensureSystemViewPage(port) {
   config.sysviewInjected = true;
   saveConfig();
 }
+// The Music controller is a built-in APP page (kind:'app', app:'music') that embeds a programmable
+// 2x2 tile grid — edited in the editor exactly like Default/Media/Dev, its tiles launched via runAction.
+// Ensure one exists on first run; respect deletion thereafter (musicInjected gate).
+function ensureMusicPage() {
+  if (!config.grids) config.grids = [];
+  let g = config.grids.find(x => x.id === 'music');
+  if (!g) {
+    if (config.musicInjected) return;                      // user deleted it on purpose — leave it gone
+    g = { id: 'music' }; config.grids.push(g); config.musicInjected = true;
+  }
+  g.name = g.name || 'Music';
+  g.kind = 'app'; g.app = 'music';                         // (re)assert the app shape; migrates the old web-page form
+  delete g.url; delete g.auth;
+  if (typeof g.cols !== 'number') g.cols = 2;
+  if (typeof g.rows !== 'number') g.rows = 2;
+  if (!Array.isArray(g.tiles) || !g.tiles.length) {
+    const def = loadApps().find(a => a.id === 'music');
+    g.tiles = ((def && def.grid && def.grid.defaults) || []).map(t => Object.assign({}, t));
+  }
+  saveConfig();
+}
+// The Music app's embedded grid is served to the page (resolved icons) and its taps launched, both
+// keyed to whichever music page is currently shown.
+async function getMusicTiles() {
+  const g = activeGrid();
+  if (!(g && g.kind === 'app' && g.app === 'music')) return { cols: 2, rows: 2, tiles: [] };
+  const resolved = await resolveGridIcons(Object.assign({}, g, { kind: 'grid' }));   // resolve icons (force the tile path)
+  return { cols: g.cols || 2, rows: g.rows || 2, tiles: resolved.tiles || [] };
+}
+function onMusicLaunch(i) {
+  const g = activeGrid();
+  if (g && g.kind === 'app' && g.app === 'music' && g.tiles && g.tiles[i]) { runAction(g.tiles[i]); return true; }
+  return false;
+}
 function hostMatches(a, b) { try { return new URL(a).host === new URL(b).host; } catch (e) { return false; } }
 
 // Bundled local apps (apps/apps.json) — name, file, and an options schema the editor renders.
@@ -77,6 +112,7 @@ function loadApps() {
 function appPageUrl(page) {
   const def = loadApps().find(a => a.id === page.app);
   if (!def) return 'about:blank';
+  if (def.served) return 'http://127.0.0.1:' + serverPort + '/' + def.id;   // served by the local server (live data + same-origin fetch + grid launch)
   const file = path.join(APPS_DIR, def.file);
   const opts = page.options || {};
   const hash = (def.options || []).map(o => {
@@ -98,13 +134,26 @@ async function pushToPanel() {
   }
 }
 
-// Resolve app/image icons to something the panel renderer can draw (data: URL or file: URL).
+// Read a local image file into a data: URL so it renders in ANY panel page — including the http-served
+// app pages (Music), which (unlike the native grid) cannot load file:// images.
+function imageFileToDataUrl(p) {
+  try {
+    const buf = fs.readFileSync(p);
+    const ext = path.extname(p).slice(1).toLowerCase();
+    const mime = ext === 'svg' ? 'image/svg+xml' : (ext === 'jpg' || ext === 'jpeg') ? 'image/jpeg' : ext === 'ico' ? 'image/x-icon' : 'image/' + (ext || 'png');
+    return 'data:' + mime + ';base64,' + buf.toString('base64');
+  } catch (e) { return null; }
+}
+// Resolve app/image icons to a data: URL the panel renderer can draw (works in native + http pages).
 async function resolveGridIcons(grid) {
   if (grid.kind === 'app') return { ...grid, kind: 'web', url: appPageUrl(grid) };   // render the local app in the webview
   if (grid.kind === 'web') return grid;   // dashboard page — no tiles to resolve
   const tiles = await Promise.all((grid.tiles || []).map(async t => {
     const out = { ...t };
-    if (t.iconType === 'image' && t.iconImage) { try { out.iconSrc = pathToFileURL(t.iconImage).href; } catch (e) {} }
+    if (t.iconType === 'image' && t.iconImage) {
+      out.iconSrc = imageFileToDataUrl(t.iconImage);
+      if (!out.iconSrc) { try { out.iconSrc = pathToFileURL(t.iconImage).href; } catch (e) {} }   // fallback
+    }
     else if (t.iconType === 'app') { const d = await getAppIconDataUrl(t.value); if (d) out.iconSrc = d; }
     return out;
   }));
@@ -150,6 +199,16 @@ function runAction(a) {
         break;
     }
   } catch (e) { console.log('action error:', e.message); }
+}
+
+// Media transport for the Music page — global media keys via robotjs (instant, in-process; Windows
+// routes them to the active SMTC session, the same one nowplaying.js reports).
+function mediaKey(cmd) {
+  if (!robot) return false;
+  const map = { playpause: 'audio_play', next: 'audio_next', prev: 'audio_prev', stop: 'audio_stop' };
+  const k = map[cmd];
+  if (!k) return false;
+  try { robot.keyTap(k); return true; } catch (e) { return false; }
 }
 
 function deviceDisplay() {
@@ -304,8 +363,12 @@ app.whenReady().then(async () => {
   createTray();
   // SystemView: live local metrics server on 127.0.0.1 (OS-assigned port) + ensure the dashboard page.
   // Lazy-required so a metrics/load failure can never crash the rest of the app.
-  try { sysserver = require('./sysserver'); const port = await sysserver.start(); ensureSystemViewPage(port); console.log('SystemView on http://127.0.0.1:' + port); }
-  catch (e) { console.log('SystemView failed to start:', e.message); }
+  try {
+    sysserver = require('./sysserver');
+    serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onMusicLaunch, getMusicTiles });
+    ensureSystemViewPage(serverPort); ensureMusicPage();
+    console.log('SystemView + Music on http://127.0.0.1:' + serverPort);
+  } catch (e) { console.log('local panel services failed to start:', e.message); }
 
   // Dashboard auth injection for the webview session. The active page's auth config drives it:
   //  - 'header'  -> add custom header(s) to requests to the dashboard host (bearer / Cloudflare Access / …)

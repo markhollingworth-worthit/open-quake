@@ -9,5 +9,22 @@
       { "key": "seconds", "label": "Show seconds",  "type": "bool",   "default": false },
       { "key": "date",    "label": "Show date & day", "type": "bool", "default": true }
     ]
+  },
+  {
+    "id": "music",
+    "name": "Music",
+    "file": "musicview.html",
+    "served": true,
+    "options": [],
+    "grid": {
+      "cols": 2,
+      "rows": 2,
+      "defaults": [
+        { "label": "Spotify",     "icon": "🎵", "type": "url", "value": "https://open.spotify.com" },
+        { "label": "YT Music",    "icon": "📺", "type": "url", "value": "https://music.youtube.com" },
+        { "label": "Apple Music", "icon": "🍎", "type": "url", "value": "https://music.apple.com" },
+        { "label": "Tidal",       "icon": "🌊", "type": "url", "value": "https://listen.tidal.com" }
+      ]
+    }
   }
 ]
