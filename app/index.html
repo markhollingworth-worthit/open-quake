@@ -173,6 +173,19 @@
     idleT = setTimeout(() => { armed = false; highlight(-1); }, 180);
   });
 
+  // ---- PC mouse -> launch (the panel is a real display; let the cursor click tiles too) ----
+  grid.addEventListener('click', (e) => {
+    if (selOpen || webMode) return;                  // ignore while picking a page / on dashboards (webview clicks natively)
+    const el = e.target.closest && e.target.closest('[data-i]');
+    if (!el) return;
+    const i = parseInt(el.dataset.i, 10);
+    if (i >= 0 && cfg.tiles[i] && cfg.tiles[i].type) {
+      highlight(i);
+      ipcRenderer.send('launch', cfg.tiles[i]);
+      setTimeout(() => highlight(-1), 180);
+    }
+  });
+
   // ---- dashboard touch -> mouse (tap = click, drag = move) ----
   function webTouch(p) {
     if (!webReady) return;
