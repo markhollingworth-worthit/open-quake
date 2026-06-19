@@ -118,7 +118,7 @@
     return { hue: Math.round((h / 360) * 255), sat: Math.round((mx ? d / mx : 0) * 255) };
   }
   const appIconCache = {};   // app value -> dataURL | false (failed) | null (in-flight)
-  const TYPES = [['', 'Empty'], ['app', 'App / Program'], ['url', 'Website (URL)'], ['cmd', 'Shell command'], ['open', 'Open file/folder'], ['system', 'System (lock/config)']];
+  const TYPES = [['', 'Empty'], ['app', 'App / Program'], ['url', 'Website (URL)'], ['page', 'Go to open-quake page'], ['cmd', 'Shell command'], ['open', 'Open file/folder'], ['system', 'System (lock/config)']];
   const uid = () => 'g' + Math.random().toString(36).slice(2, 8);
   const curGrid = () => config.grids[gi];
   const esc = s => (s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -316,14 +316,18 @@
       <p class="sectitle">Tile ${ti + 1}</p>
       <div class="row"><label>Label</label><input id="tLabel" value="${esc(t.label)}"></div>
       <div class="row"><label>Type</label><select id="tType">${TYPES.map(([v, n]) => `<option value="${v}" ${v === (t.type || '') ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
-      <div class="row"><label>Value</label><input id="tValue" value="${esc(t.value)}" placeholder="${valuePlaceholder(t.type)}">
-        <button id="tBrowse" ${t.type === 'app' || t.type === 'open' ? '' : 'style="display:none"'}>Browse…</button></div>
+      <div class="row"><label>${t.type === 'page' ? 'Page' : 'Value'}</label>${t.type === 'page'
+        ? pageSelectHtml(t)
+        : `<input id="tValue" value="${esc(t.value)}" placeholder="${valuePlaceholder(t.type)}"><button id="tBrowse" ${t.type === 'app' || t.type === 'open' ? '' : 'style="display:none"'}>Browse…</button>`}</div>
       <div class="row"><button class="danger" id="tClear">Clear tile</button></div>
       <p class="hint">${typeHint(t.type)}</p>
     </div>`;
     document.getElementById('tLabel').oninput = e => { t.label = e.target.value; renderTiles(); markDirty(); };
-    document.getElementById('tType').onchange = e => { t.type = e.target.value; render(); markDirty(); };
-    document.getElementById('tValue').oninput = e => { t.value = e.target.value; renderTiles(); renderIconPane(); markDirty(); };
+    document.getElementById('tType').onchange = e => { const prev = t.type; t.type = e.target.value; if (t.type === 'page' || prev === 'page') t.value = ''; render(); markDirty(); };
+    const tv = document.getElementById('tValue');
+    if (tv) tv.oninput = e => { t.value = e.target.value; renderTiles(); renderIconPane(); markDirty(); };
+    const tp = document.getElementById('tPage');
+    if (tp) { if (tp.value && tp.value !== t.value) { t.value = tp.value; markDirty(); } tp.onchange = e => { t.value = e.target.value; renderTiles(); markDirty(); }; }
     document.getElementById('tClear').onclick = () => { flattenAt(g, ti); g.tiles[ti] = blankTile(); render(); markDirty(); };
     const br = document.getElementById('tBrowse');
     if (br) br.onclick = async () => { const p = await ipcRenderer.invoke('pickProgram'); if (p) { t.value = p; if (!t.label) t.label = baseName(p); render(); markDirty(); } };
@@ -379,9 +383,15 @@
   }
 
   function valuePlaceholder(type) { return type === 'url' ? 'https://…' : type === 'app' ? 'chrome  (or full path)' : type === 'cmd' ? 'start ms-settings:' : type === 'system' ? 'lock  |  config  |  mic' : ''; }
+  function pageSelectHtml(t) {
+    const others = (config.grids || []).filter(g => g.id !== curGrid().id);
+    if (!others.length) return '<span class="hint">No other pages to link to yet — add one first.</span>';
+    return `<select id="tPage">${others.map(g => `<option value="${g.id}" ${g.id === t.value ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select>`;
+  }
   function typeHint(type) {
     if (type === 'app') return 'Program name on PATH (chrome, notepad…) or a full .exe path via Browse.';
     if (type === 'url') return 'Opens in your default browser.';
+    if (type === 'page') return 'Tapping (or clicking) this tile switches the panel to the chosen page.';
     if (type === 'cmd') return 'Runs a shell command (advanced).';
     if (type === 'system') return 'lock = lock screen · config = open this editor · mic = toggle the device mic.';
     return '';

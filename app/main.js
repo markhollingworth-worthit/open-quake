@@ -125,6 +125,7 @@ function runAction(a) {
       case 'app': exec(`start "" "${a.value}"`, { windowsHide: true }); break;
       case 'cmd': exec(a.value, { windowsHide: true }); break;
       case 'open': shell.openPath(a.value); break;
+      case 'page': gotoGrid(a.value, true); if (rotateRunning) scheduleRotation(); break;   // switch the panel to another page
       case 'system':
         if (a.value === 'lock') exec('rundll32.exe user32.dll,LockWorkStation');
         else if (a.value === 'mic') toggleMic();
