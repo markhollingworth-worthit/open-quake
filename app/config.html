@@ -121,6 +121,7 @@
     return { hue: Math.round((h / 360) * 255), sat: Math.round((mx ? d / mx : 0) * 255) };
   }
   const appIconCache = {};   // app value -> dataURL | false (failed) | null (in-flight)
+  const urlIconPreview = {}; // iconCache path -> dataURL of a just-fetched URL icon (editor preview only; dodges file:// browser-cache staleness on Refresh)
   const TYPES = [['', 'Empty'], ['app', 'App / Program'], ['url', 'Website (URL)'], ['page', 'Go to open-quake page'], ['cmd', 'Shell command'], ['open', 'Open file/folder'], ['system', 'System (lock/config)']];
   const uid = () => 'g' + Math.random().toString(36).slice(2, 8);
   const curGrid = () => config.grids[gi];
@@ -142,6 +143,7 @@
     b.textContent = show ? '🙈' : '👁';
   });
   const fileUrl = p => { try { return pathToFileURL(p).href; } catch (e) { return ''; } };
+  const urlSrc = t => urlIconPreview[t.iconCache] || fileUrl(t.iconCache);   // URL-icon source: fresh fetch preview, else the cached file
   const baseName = p => p.split(/[\\/]/).pop().replace(/\.(exe|lnk|bat|cmd|com)$/i, '');
   const iconTypeOf = t => t.iconType || 'emoji';
 
@@ -160,7 +162,7 @@
   function doSave() { ipcRenderer.send('saveConfigFromEditor', config); dirty = false; document.getElementById('saveBtn').disabled = true; setState('saved ✓', 'saved'); }
 
   // ---- tiles / icons ----
-  function blankTile() { return { label: '', icon: '', type: '', value: '', iconType: 'emoji', iconImage: '' }; }
+  function blankTile() { return { label: '', icon: '', type: '', value: '', iconType: 'emoji', iconImage: '', iconUrl: '', iconCache: '' }; }
   function ensureTiles(g) { const need = g.cols * g.rows; while (g.tiles.length < need) g.tiles.push(blankTile()); g.tiles.length = need; }
 
   async function ensureAppIcon(value) {
@@ -173,6 +175,7 @@
   function iconHtml(t, ctx) {
     const type = iconTypeOf(t);
     if (type === 'image' && t.iconImage) return `<img class="${ctx === 'cell' ? 'cimg' : ''}" src="${fileUrl(t.iconImage)}">`;
+    if (type === 'url' && t.iconCache) return `<img class="${ctx === 'cell' ? 'cimg' : ''}" src="${urlSrc(t)}">`;
     if (type === 'app' && t.value) {
       const c = appIconCache[t.value];
       if (c) return `<img class="${ctx === 'cell' ? 'cimg' : ''}" src="${c}">`;
@@ -296,7 +299,7 @@
   }
   function unmergeTile(g) { flattenAt(g, ti); selEnd = -1; render(); markDirty(); }
   function swapTiles(g, a, b) { const t = g.tiles[a]; g.tiles[a] = g.tiles[b]; g.tiles[b] = t; ti = b; selEnd = -1; render(); markDirty(); }
-  function tileFields(t) { return { label: (t && t.label) || '', icon: (t && t.icon) || '', type: (t && t.type) || '', value: (t && t.value) || '', iconType: (t && t.iconType) || 'emoji', iconImage: (t && t.iconImage) || '' }; }
+  function tileFields(t) { return { label: (t && t.label) || '', icon: (t && t.icon) || '', type: (t && t.type) || '', value: (t && t.value) || '', iconType: (t && t.iconType) || 'emoji', iconImage: (t && t.iconImage) || '', iconUrl: (t && t.iconUrl) || '', iconCache: (t && t.iconCache) || '' }; }
   function handleDrop(g, from, to) {
     if (from < 0 || from === to) return;
     const sf = g.tiles[from], sw = (sf && sf.w) || 1, sh = (sf && sf.h) || 1;
@@ -367,6 +370,7 @@
       <label class="iconopt"><input type="radio" name="ic" value="emoji" ${type === 'emoji' ? 'checked' : ''}> Emoji</label>
       <label class="iconopt ${appOk ? '' : 'disabled'}"><input type="radio" name="ic" value="app" ${type === 'app' ? 'checked' : ''} ${appOk ? '' : 'disabled'}> App icon ${appOk ? '' : '<span class="note">(set Type = App)</span>'}</label>
       <label class="iconopt"><input type="radio" name="ic" value="image" ${type === 'image' ? 'checked' : ''}> Image</label>
+      <label class="iconopt"><input type="radio" name="ic" value="url" ${type === 'url' ? 'checked' : ''}> Image URL</label>
       <div class="icondetail" id="icondetail"></div>
       <div class="iconpreview" id="iconpreview"></div>
     </div>`;
@@ -384,9 +388,25 @@
     } else if (type === 'app') {
       el.innerHTML = `<p class="hint">${t.value ? 'Uses this program’s own icon: <b>' + esc(t.value) + '</b>' : 'Set a program in Value first.'}</p>`;
       if (t.value) ensureAppIcon(t.value);
-    } else {
+    } else if (type === 'image') {
       el.innerHTML = `<div class="row"><input id="tImage" value="${esc(t.iconImage)}" placeholder="path to an image" readonly><button id="tImgBrowse">Browse…</button></div>`;
       document.getElementById('tImgBrowse').onclick = async () => { const p = await ipcRenderer.invoke('pickImage'); if (p) { t.iconImage = p; renderIconDetail(t); renderIconPreview(t); renderTiles(); markDirty(); } };
+    } else if (type === 'url') {
+      el.innerHTML = `<div class="row"><input id="tUrl" value="${esc(t.iconUrl)}" placeholder="https://…/icon.png" style="flex:1"><button id="tUrlGet">Fetch</button></div>
+        <p class="hint" id="tUrlMsg" style="margin:4px 0 0">Paste an image URL, then Fetch — it's downloaded and cached so the icon works offline.</p>`;
+      const inp = document.getElementById('tUrl'), msg = () => document.getElementById('tUrlMsg'), btn = () => document.getElementById('tUrlGet');
+      // "Refresh" only when the box matches the already-cached URL; any edit (or no cache yet) shows "Fetch", so it's clear there's a change to apply.
+      const sync = () => { btn().textContent = (t.iconCache && inp.value.trim() === (t.iconUrl || '')) ? 'Refresh' : 'Fetch'; };
+      sync();
+      inp.oninput = sync;
+      btn().onclick = async () => {
+        const url = inp.value.trim(); if (!url) { msg().textContent = 'Enter an image URL first.'; return; }
+        msg().textContent = 'Fetching…'; btn().disabled = true;
+        const r = await ipcRenderer.invoke('fetchIconUrl', url);
+        btn().disabled = false;
+        if (r && r.ok) { t.iconUrl = url; t.iconCache = r.cachePath; if (r.dataUrl) urlIconPreview[r.cachePath] = r.dataUrl; msg().textContent = 'Icon downloaded ✓'; sync(); renderIconPreview(t); renderTiles(); markDirty(); }
+        else { msg().textContent = (r && r.error) || 'Could not fetch that image.'; }
+      };
     }
   }
 
@@ -394,6 +414,8 @@
     const el = document.getElementById('iconpreview'); if (!el) return;
     const type = iconTypeOf(t);
     if (type === 'image' && t.iconImage) el.innerHTML = `<img src="${fileUrl(t.iconImage)}">`;
+    else if (type === 'url' && t.iconCache) el.innerHTML = `<img src="${urlSrc(t)}">`;
+    else if (type === 'url') el.innerHTML = `<span class="none">fetch an image URL to preview</span>`;
     else if (type === 'app' && t.value) {
       const c = appIconCache[t.value];
       if (c) el.innerHTML = `<img src="${c}">`;

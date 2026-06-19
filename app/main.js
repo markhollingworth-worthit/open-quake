@@ -1,8 +1,9 @@
 'use strict';
 // DK-QUAKE launcher: multi-grid panel + PC config editor, on the open Aris68Connector driver.
-const { app, BrowserWindow, Tray, Menu, nativeImage, screen, powerSaveBlocker, ipcMain, shell, dialog, session } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, screen, powerSaveBlocker, ipcMain, shell, dialog, session, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { exec } = require('child_process');
 const { pathToFileURL } = require('url');
 const HID = require('node-hid');
@@ -164,6 +165,67 @@ function imageFileToDataUrl(p) {
     return 'data:' + mime + ';base64,' + buf.toString('base64');
   } catch (e) { return null; }
 }
+
+// Detect the real image format from the file's magic bytes. Servers sometimes mislabel content-type
+// (e.g. clipartmax serves a JPEG as image/png), so we trust the bytes — the cached file needs the TRUE
+// extension because imageFileToDataUrl derives the data-URL mime from the extension at render time.
+function imageInfoFromBytes(buf) {
+  if (buf.length >= 3 && buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return { mime: 'image/jpeg', ext: 'jpg' };
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return { mime: 'image/png', ext: 'png' };
+  if (buf.length >= 4 && buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return { mime: 'image/gif', ext: 'gif' };
+  if (buf.length >= 12 && buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return { mime: 'image/webp', ext: 'webp' };
+  if (buf.length >= 2 && buf[0] === 0x42 && buf[1] === 0x4D) return { mime: 'image/bmp', ext: 'bmp' };
+  if (buf.length >= 4 && buf[0] === 0x00 && buf[1] === 0x00 && buf[2] === 0x01 && buf[3] === 0x00) return { mime: 'image/x-icon', ext: 'ico' };
+  if (buf.slice(0, 512).toString('utf8').toLowerCase().includes('<svg')) return { mime: 'image/svg+xml', ext: 'svg' };
+  return null;
+}
+
+// Download an image URL into the on-disk icon cache and return its local path. For URL tile icons:
+// the file is then rendered through the SAME file->data:URL path as local images, so it works offline
+// and in the http-served grids. Guardrails: http(s) only, real image bytes only, size-capped.
+// Uses net.request (not net.fetch) so we can set a User-Agent — some hosts (e.g. Wikimedia) 403 without one.
+const ICON_CACHE_DIR = path.join(USER_DIR, 'iconcache');
+const ICON_MAX_BYTES = 3 * 1024 * 1024;
+function fetchIconToCache(url) {
+  url = (url || '').trim();
+  return new Promise(resolve => {
+    if (!/^https?:\/\//i.test(url)) return resolve({ ok: false, error: 'Only http(s) URLs are allowed.' });
+    let req;
+    try { req = net.request({ url, redirect: 'follow' }); }
+    catch (e) { return resolve({ ok: false, error: 'That URL is not valid.' }); }
+    req.setHeader('User-Agent', 'open-quake/' + app.getVersion() + ' (+https://github.com/TeeJS/open-quake)');
+    req.setHeader('Accept', 'image/*');
+    let done = false;
+    const fail = msg => { if (done) return; done = true; try { req.abort(); } catch (e) {} resolve({ ok: false, error: msg }); };
+    req.on('error', () => fail('Could not reach that URL.'));
+    req.on('response', resp => {
+      const status = resp.statusCode;
+      if (status < 200 || status >= 300) { resp.resume(); return fail('Server returned HTTP ' + status + '.'); }
+      const raw = resp.headers['content-type'];
+      const ctype = String(Array.isArray(raw) ? raw[0] : (raw || '')).split(';')[0].trim().toLowerCase();
+      // Reject obvious non-images on the header (avoid downloading an HTML page); allow image/*,
+      // octet-stream, or a missing type — then confirm by sniffing the actual bytes below.
+      if (ctype && !ctype.startsWith('image/') && ctype !== 'application/octet-stream') { resp.resume(); return fail('That URL is not an image (' + ctype + ').'); }
+      const chunks = []; let total = 0;
+      resp.on('data', d => { total += d.length; if (total > ICON_MAX_BYTES) return fail('Image is too large (over 3 MB).'); chunks.push(d); });
+      resp.on('error', () => fail('Error reading the image.'));
+      resp.on('end', () => {
+        if (done) return; done = true;
+        const buf = Buffer.concat(chunks);
+        if (!buf.length) return resolve({ ok: false, error: 'The image was empty.' });
+        const info = imageInfoFromBytes(buf);   // trust the real bytes over the (sometimes wrong) content-type header
+        if (!info && !ctype.startsWith('image/')) return resolve({ ok: false, error: "That URL doesn't appear to be an image." });
+        const mime = info ? info.mime : ctype;
+        const ext = info ? info.ext : (ctype === 'image/jpeg' ? 'jpg' : ctype === 'image/svg+xml' ? 'svg' : (ctype === 'image/x-icon' || ctype === 'image/vnd.microsoft.icon') ? 'ico' : (ctype.slice(6).replace(/[^a-z0-9]/g, '') || 'png'));
+        try { fs.mkdirSync(ICON_CACHE_DIR, { recursive: true }); } catch (e) {}
+        const file = path.join(ICON_CACHE_DIR, crypto.createHash('sha1').update(url).digest('hex').slice(0, 16) + '.' + ext);
+        try { fs.writeFileSync(file, buf); } catch (e) { return resolve({ ok: false, error: 'Could not save the icon to the cache.' }); }
+        resolve({ ok: true, cachePath: file, dataUrl: 'data:' + mime + ';base64,' + buf.toString('base64') });
+      });
+    });
+    req.end();
+  });
+}
 // Resolve app/image icons to a data: URL the panel renderer can draw (works in native + http pages).
 async function resolveGridIcons(grid) {
   if (grid.kind === 'app') return { ...grid, kind: 'web', url: appPageUrl(grid) };   // render the local app in the webview
@@ -174,6 +236,7 @@ async function resolveGridIcons(grid) {
       out.iconSrc = imageFileToDataUrl(t.iconImage);
       if (!out.iconSrc) { try { out.iconSrc = pathToFileURL(t.iconImage).href; } catch (e) {} }   // fallback
     }
+    else if (t.iconType === 'url' && t.iconCache) { out.iconSrc = imageFileToDataUrl(t.iconCache); }   // cached download -> data URL; null (gone) -> emoji fallback
     else if (t.iconType === 'app') { const d = await getAppIconDataUrl(t.value); if (d) out.iconSrc = d; }
     return out;
   }));
@@ -440,6 +503,7 @@ app.whenReady().then(async () => {
     return (r.canceled || !r.filePaths.length) ? null : r.filePaths[0];
   });
   ipcMain.handle('getAppIcon', (e, value) => getAppIconDataUrl(value));
+  ipcMain.handle('fetchIconUrl', (e, url) => fetchIconToCache(url));
 
   // Knob RGB ring (QMK VIA). The editor's Settings page reads the device's current lighting, then
   // applies each change live; "Save to device" persists it to the device's own flash.
