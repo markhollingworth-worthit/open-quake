@@ -36,6 +36,9 @@ It gives you:
   **auto-rotate** the panel through your pages on a timer, toggle the on-board mic, and
   tune the knob's ring lighting — from the editor's **⚙ Settings** page. open-quake also
   lives in the system tray for quick toggles.
+- **A system monitor** — a built-in **System Monitor** page shows your PC's live CPU/GPU load,
+  memory, per-drive disk, network, and process count on the panel (see
+  [System monitor](#system-monitor-systemview)).
 
 > **Status:** early. Touch, knob (incl. the RGB ring), grids, merged buttons, web
 > dashboards, the on-board mic, and the editor are working and validated against real
@@ -139,6 +142,31 @@ Write your own: drop an HTML file in `apps/` that reads its settings from the UR
 **hash** (e.g. `…/myapp.html#color=red`) — a `?query` doesn't survive a `file://`
 load — and add an entry to `apps/apps.json` describing its options.
 
+## System monitor (SystemView)
+
+A built-in **System Monitor** page shows your PC's live state on the panel — CPU and GPU
+load, memory, per-drive disk usage, network throughput, process count, and (on laptops)
+battery. It's added automatically on first run as a page named **System Monitor**, and it's a
+normal page you can rename, reorder, include in rotation, or delete (delete it and it stays gone).
+
+Under the hood open-quake runs a tiny metrics server bound to `127.0.0.1` (loopback only —
+never exposed on the network) and the page reads from it once a second. **No admin rights and
+no extra software required.**
+
+**Honest gaps — anything unavailable shows "—", never a fake `0`:**
+
+- **CPU temperature** shows **"—"**. Windows doesn't expose CPU temperature to a normal app:
+  the WMI thermal-zone class needs administrator rights and, on most modern CPUs, returns
+  nothing anyway. Reading it reliably needs a kernel-level helper (e.g. LibreHardwareMonitor)
+  run as admin — which open-quake deliberately doesn't bundle.
+- **GPU load** works on **all GPUs** (Intel / AMD / NVIDIA) — read from the Windows GPU
+  performance counters, the same source Task Manager uses, no admin.
+- **GPU temperature** shows for **NVIDIA** cards (via `nvidia-smi`, which ships with the
+  driver). **AMD and Intel GPUs show "—"** — their temperature is only available through a
+  vendor SDK (AMD ADLX, Intel's control library) that we don't bundle, to keep open-quake
+  portable and install-free.
+- **Battery** appears on laptops; on a desktop (no battery) the widget is hidden.
+
 ## Adding a dashboard
 
 Web **Dashboard** pages are added the same way as grids and apps — **+ Dashboard**
@@ -183,6 +211,9 @@ app/                      the Electron launcher + PC grid editor     [MIT]
   index.html              the on-panel UI (grids + web dashboards)
   config.html             the PC editor (pages, tiles, icons)
   config.default.json     seed config (copied to config.json on first run)
+  sysmetrics.js           SystemView: live host metrics (systeminformation + GPU counters)
+  sysserver.js            SystemView: localhost metrics server (page + /metrics JSON)
+  sysview.html            SystemView: the on-panel system-monitor dashboard
 apps/                     bundled local web apps + apps.json manifest [MIT]
 ```
 

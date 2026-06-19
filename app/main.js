@@ -21,6 +21,7 @@ let micState = false;     // current device mic state (LED follows it)
 let lastRingEffect = LED_DEFAULT.effect; // remembered so the tray on/off toggle can restore the prior effect
 let rotateRunning = false;               // screen-rotation runtime on/off (starts per settings on launch)
 let rotTimer = null;
+let sysserver = null;                    // SystemView local metrics server (lazy-required in whenReady)
 let config = loadConfig();
 let panelWin = null, configWin = null, tray = null;
 const dev = new Aris68Connector({ hid: HID });
@@ -48,6 +49,22 @@ function migrateConfig(c) {
     }
   });
   return c;
+}
+// SystemView is a built-in localhost dashboard. Ensure the page exists and its url points at the
+// current (ephemeral) server port. Respect deletion: once injected, if the user removes it we don't
+// re-add it (tracked via config.sysviewInjected) — so deleting it sticks.
+function ensureSystemViewPage(port) {
+  const url = `http://127.0.0.1:${port}/`;
+  if (!config.grids) config.grids = [];
+  const existing = config.grids.find(g => g.id === 'sysview');
+  if (existing) {                                          // keep the user's name/rotate; just refresh the (dynamic) port
+    if (existing.url !== url) { existing.url = url; saveConfig(); if (config.activeGridId === 'sysview') pushToPanel(); }
+    return;
+  }
+  if (config.sysviewInjected) return;                      // user deleted it on purpose — leave it gone
+  config.grids.push({ id: 'sysview', name: 'System Monitor', kind: 'web', url, auth: { type: 'none' }, rotate: false });
+  config.sysviewInjected = true;
+  saveConfig();
 }
 function hostMatches(a, b) { try { return new URL(a).host === new URL(b).host; } catch (e) { return false; } }
 
@@ -282,9 +299,13 @@ app.on('second-instance', () => {
   else openConfigWindow();
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   try { powerSaveBlocker.start('prevent-display-sleep'); } catch (e) {}
   createTray();
+  // SystemView: live local metrics server on 127.0.0.1 (OS-assigned port) + ensure the dashboard page.
+  // Lazy-required so a metrics/load failure can never crash the rest of the app.
+  try { sysserver = require('./sysserver'); const port = await sysserver.start(); ensureSystemViewPage(port); console.log('SystemView on http://127.0.0.1:' + port); }
+  catch (e) { console.log('SystemView failed to start:', e.message); }
 
   // Dashboard auth injection for the webview session. The active page's auth config drives it:
   //  - 'header'  -> add custom header(s) to requests to the dashboard host (bearer / Cloudflare Access / …)
@@ -395,3 +416,4 @@ app.whenReady().then(() => {
 });
 }
 app.on('window-all-closed', () => {});
+app.on('before-quit', () => { try { if (sysserver) sysserver.stop(); } catch (e) {} });   // stop metrics timers + close the server

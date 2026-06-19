@@ -22,7 +22,8 @@
   ],
   "dependencies": {
     "node-hid": "^3.3.0",
-    "robotjs": "^0.6.0"
+    "robotjs": "^0.6.0",
+    "systeminformation": "^5.31.7"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.6.0",
