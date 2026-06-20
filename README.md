@@ -1,5 +1,7 @@
 # open-quake
 
+> **Disclaimer:** open-quake is an independent third-party community project. It is not affiliated with, endorsed by, maintained by, verified by, certified by, or officially supported by DECOKEE. DK-Suite is the official software for DECOKEE Quake. open-quake is not an official open-source version of DK-Suite. Use of open-quake is at your own risk.
+
 An open driver and touchscreen launcher for the **DK-QUAKE / ARIS-68** — the
 1920×480 touchscreen-plus-knob macro device (sold with the closed-source
 DK-Suite app). `open-quake` talks to it directly over HID, with no vendor
