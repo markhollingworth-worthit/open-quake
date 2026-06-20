@@ -16,7 +16,7 @@ const DEFAULT_CONFIG_PATH = path.join(__dirname, 'config.default.json'); // bund
 const LEGACY_CONFIG_PATH = path.join(__dirname, 'config.json');          // pre-userData dev location, migrated once
 const APPS_DIR = path.join(__dirname, '..', 'apps').replace('app.asar', 'app.asar.unpacked'); // unpacked when packaged
 const LED_DEFAULT = { effect: 1, brightness: 200, speed: 128, hue: 128, sat: 255 }; // ring lighting fallback (effect 1 = Solid Color)
-const DEFAULT_SETTINGS = { launchMode: 'editor', micOnLaunch: false, lighting: Object.assign({}, LED_DEFAULT) };
+const DEFAULT_SETTINGS = { launchMode: 'editor', micOnLaunch: false, knob: { rotateAction: 'volume' }, lighting: Object.assign({}, LED_DEFAULT) };
 let firstRun = false;     // set by loadConfig when there was no prior config (fresh install)
 let micState = false;     // current device mic state (LED follows it)
 let lastRingEffect = LED_DEFAULT.effect; // remembered so the tray on/off toggle can restore the prior effect
@@ -27,7 +27,11 @@ let serverPort = 0;                      // the local server's ephemeral port (f
 let config = loadConfig();
 let panelWin = null, configWin = null, tray = null;
 const dev = new Aris68Connector({ hid: HID });
-function appSettings() { return Object.assign({}, DEFAULT_SETTINGS, config.settings || {}); }
+function appSettings() {
+  const s = Object.assign({}, DEFAULT_SETTINGS, config.settings || {});
+  s.knob = Object.assign({}, DEFAULT_SETTINGS.knob, (config.settings || {}).knob || {});
+  return s;
+}
 
 // User config lives in the OS user-data dir (writable even inside a packaged app). On first run it's
 // seeded from a previous dev config (app/config.json) if present, otherwise the bundled default.
@@ -150,6 +154,7 @@ async function pushToPanel() {
     syncPollers(g);                                                // run only the poller the shown page needs (before the webview reloads, so it primes)
     panelWin.webContents.send('grid', await resolveGridIcons(g));
     panelWin.webContents.send('gridList', { grids: gridList(), activeId: config.activeGridId });
+    panelWin.webContents.send('settings', { knob: appSettings().knob });
     pushRotationState();
     if (!config.introShown) panelWin.webContents.send('intro');   // one-time "double-click the knob" overlay
   }

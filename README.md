@@ -24,8 +24,9 @@ It gives you:
 - **Web dashboard pages** — a page can be a live web view (Home Assistant, Grafana,
   a status page…) shown full-screen; the knob scrolls, a tap clicks, logins persist,
   with per-page auth (HA token, Basic, custom headers). → [Dashboards](docs/dashboards.md)
-- **Knob control** — rotate for volume (or dashboard scroll), single-click to mute,
-  **double-click for the page selector**, and **hold to talk** (voice input). The
+- **Knob control** — rotate for volume/dashboard scroll or set rotation to open
+  the page selector, single-click to mute, **double-click for the page selector**, and
+  **hold to talk** (voice input). The
   knob's **RGB ring** is configurable. → [Settings](docs/settings.md)
 - **Bundled apps** — a Flip Clock, a **[Music controller](docs/music.md)** (now-playing +
   transport + app grid), a **[System Monitor](docs/system-monitor.md)** (live

@@ -72,6 +72,7 @@
   const intro = document.getElementById('intro'), introok = document.getElementById('introok');
   let cfg = { cols: 8, rows: 2, tiles: [] };
   let grids = [], activeId = null, rotEnabled = false, rotRunning = false, introOpen = false;
+  let knobRotateAction = 'volume';
   let armed = false, idleT = null, lastHit = -1, volT = null;
   let selOpen = false, selIdx = 0, selAutoClose = null;
   let webMode = false, curUrl = '', webReady = false, webDown = false, lastWeb = { x: 0, y: 0 }, webIdle = null;
@@ -164,6 +165,9 @@
   });
   ipcRenderer.on('gridList', (e, d) => { grids = d.grids; activeId = d.activeId; if (selOpen) renderWheel(); });
   ipcRenderer.on('rotation', (e, r) => { rotEnabled = !!r.enabled; rotRunning = !!r.running; if (selOpen) renderWheel(); });
+  ipcRenderer.on('settings', (e, s) => {
+    knobRotateAction = s && s.knob && s.knob.rotateAction === 'pages' ? 'pages' : 'volume';
+  });
 
   // ---- first-run intro overlay (one-time "double-click the knob" hint) ----
   ipcRenderer.on('intro', () => { if (introOpen) return; introOpen = true; intro.classList.add('open'); });
@@ -257,7 +261,11 @@
     if (it && it.rot) ipcRenderer.send('toggleRotation');
     else if (it) ipcRenderer.send('switchGrid', it.id);
   }
-  function resetAutoClose() { clearTimeout(selAutoClose); selAutoClose = setTimeout(closeSelector, 4500); }
+  function resetAutoClose() { clearTimeout(selAutoClose); selAutoClose = setTimeout(closeSelector, 10000); }
+  function openSelectorByKnob(dir) {
+    openSelector();
+    if (selOpen) moveSelector(dir > 0 ? -1 : 1);
+  }
 
   // ---- knob ----
   // The knob does click-type detection in hardware: press index 1 = single-click, 2 = double-click.
@@ -272,6 +280,7 @@
     }
     if (k.type === 'rotate') {
       if (selOpen) { moveSelector(k.dir > 0 ? -1 : 1); }                  // CW scrolls down the list
+      else if (knobRotateAction === 'pages') { openSelectorByKnob(k.dir); }
       else if (webMode && webReady) {
         // Native wheel event at center: Chromium routes it to whatever element is scrollable
         // under that point, so inner scroll containers (Grafana/HA panels) scroll too.

@@ -1,5 +1,8 @@
 {
   "activeGridId": "default",
+  "settings": {
+    "knob": { "rotateAction": "volume" }
+  },
   "grids": [
     {
       "id": "default",

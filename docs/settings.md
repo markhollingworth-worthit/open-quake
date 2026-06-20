@@ -7,6 +7,9 @@ ring, microphone):
 - **On launch** — open the editor window, start **minimized** to the taskbar, or run
   **tray-only** (panel + system tray, no window). open-quake always sits in the system
   tray with quick toggles (mic, knob ring, re-place panel on the device).
+- **Knob controls** — choose what turning the knob does on the panel: adjust PC
+  volume, or open the page selector and move through pages. Press the knob to
+  select; leaving the selector idle closes it without changing pages.
 - **Screen rotation** — auto-cycle the panel through chosen pages on a timer. Turn it on,
   set the interval (5–3600 s), and pick which **categories** to include (grids, dashboards,
   apps); then tick **Include in rotation** on each page you want in the loop (a page rotates

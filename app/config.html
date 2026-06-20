@@ -581,8 +581,12 @@
   }
 
   // ---- settings page ----
-  const DEFAULT_SETTINGS = { launchMode: 'editor', micOnLaunch: false };
-  function appSettings() { return Object.assign({}, DEFAULT_SETTINGS, config.settings || {}); }
+  const DEFAULT_SETTINGS = { launchMode: 'editor', micOnLaunch: false, knob: { rotateAction: 'volume' } };
+  function appSettings() {
+    const s = Object.assign({}, DEFAULT_SETTINGS, config.settings || {});
+    s.knob = Object.assign({}, DEFAULT_SETTINGS.knob, (config.settings || {}).knob || {});
+    return s;
+  }
   function renderSettings() {
     ['tilegrid', 'mergebar', 'tileform', 'iconpane'].forEach(id => { const e = document.getElementById(id); if (e) e.innerHTML = ''; });
     const s = appSettings();
@@ -604,6 +608,14 @@
           <option value="tray">Tray only (no window)</option>
         </select></div>
       <p class="hint">The panel always activates on launch — this only controls the PC-side editor window. Tray-only hides it; reopen from the tray icon.</p>
+
+      <p class="sectitle" style="margin-top:22px">Knob controls</p>
+      <div class="row"><label>Rotate</label>
+        <select id="sKnobRotate" style="width:230px">
+          <option value="volume">Change PC volume</option>
+          <option value="pages">Switch pages</option>
+        </select></div>
+      <p class="hint">Switch pages opens the page selector on the first turn, then uses the knob to highlight a page. Press to select, or leave it idle to close.</p>
 
       <p class="sectitle" style="margin-top:22px">Screen rotation</p>
       <div class="row"><label>Auto-rotate</label>
@@ -655,6 +667,12 @@
     if (tab === 'software') {
       document.getElementById('sLaunch').value = s.launchMode;
       document.getElementById('sLaunch').onchange = e => setS('launchMode', e.target.value);
+      document.getElementById('sKnobRotate').value = s.knob.rotateAction === 'pages' ? 'pages' : 'volume';
+      document.getElementById('sKnobRotate').onchange = e => {
+        if (!config.settings) config.settings = {};
+        config.settings.knob = Object.assign({}, s.knob, { rotateAction: e.target.value === 'pages' ? 'pages' : 'volume' });
+        markDirty();
+      };
       const saveRot = r => { if (!config.settings) config.settings = {}; config.settings.rotation = r; markDirty(); };
       document.getElementById('sRot').checked = !!rot.enabled;
       document.getElementById('sRotG').checked = !!rot.cats.grids;
