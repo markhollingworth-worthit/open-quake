@@ -13,7 +13,7 @@ software running.
 
 ### **[⬇ Download for Windows](https://github.com/TeeJS/open-quake/releases/)** &nbsp;·&nbsp; or [build from source](docs/building.md)
 
-> **Switching pages:** the panel shows one page at a time — **double-click the knob** to open the page selector, rotate to highlight a page, then press to switch. open-quake shows this tip right on the panel the first time you launch it.
+> **Switching pages:** the panel shows one page at a time — **double-click the knob** to open the page selector, rotate to highlight a page, then press to switch. In Settings, knob rotation can also be set to open the selector directly.
 
 It gives you:
 

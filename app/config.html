@@ -72,7 +72,7 @@
   <header>
     <h1>open-quake Editor</h1>
     <span class="sub">edit, then Save to apply to the panel</span>
-    <span class="sub" style="flex:1; text-align:center">🔘 Double-click the knob to switch pages</span>
+    <span class="sub" id="knobHint" style="flex:1; text-align:center">🔘 Double-click the knob to switch pages</span>
     <button id="settingsBtn">⚙ Settings</button>
   </header>
   <div class="main">
@@ -465,7 +465,7 @@
       ${rotRowHtml(g)}
       <div class="row" style="margin-top:10px"><button class="danger" id="gDelete">Delete page</button></div>
       <p class="hint" id="authHint"></p>
-      <p class="hint">Shown full-screen on the panel. Knob scrolls · tap clicks · double-click the knob returns to the page selector.</p>`;
+      <p class="hint">Shown full-screen on the panel. ${knobUsesPages() ? 'Knob opens the page selector' : 'Knob scrolls'} · tap clicks · ${pageSelectorHintText()}</p>`;
     document.getElementById('gName').oninput = e => { g.name = e.target.value; renderGrids(); markDirty(); };
     document.getElementById('gUrl').oninput = e => { g.url = e.target.value; markDirty(); };
     document.getElementById('gAuth').onchange = e => { setAuthType(g, e.target.value); renderAuthFields(g); markDirty(); };
@@ -587,6 +587,14 @@
     s.knob = Object.assign({}, DEFAULT_SETTINGS.knob, (config.settings || {}).knob || {});
     return s;
   }
+  function knobUsesPages() { return appSettings().knob.rotateAction === 'pages'; }
+  function updateKnobHint() {
+    const el = document.getElementById('knobHint');
+    if (el) el.textContent = knobUsesPages() ? '🔘 Rotate the knob to switch pages' : '🔘 Double-click the knob to switch pages';
+  }
+  function pageSelectorHintText() {
+    return knobUsesPages() ? 'Rotate the knob to open the page selector.' : 'Double-click the knob to open the page selector.';
+  }
   function renderSettings() {
     ['tilegrid', 'mergebar', 'tileform', 'iconpane'].forEach(id => { const e = document.getElementById(id); if (e) e.innerHTML = ''; });
     const s = appSettings();
@@ -671,6 +679,7 @@
       document.getElementById('sKnobRotate').onchange = e => {
         if (!config.settings) config.settings = {};
         config.settings.knob = Object.assign({}, s.knob, { rotateAction: e.target.value === 'pages' ? 'pages' : 'volume' });
+        updateKnobHint();
         markDirty();
       };
       const saveRot = r => { if (!config.settings) config.settings = {}; config.settings.rotation = r; markDirty(); };
@@ -728,7 +737,7 @@
   (async () => {
     config = await ipcRenderer.invoke('getConfig'); if (!config.grids) config.grids = [];
     try { appDefs = await ipcRenderer.invoke('getApps'); } catch (e) {}
-    render(); setState('');
+    updateKnobHint(); render(); setState('');
   })();
 </script>
 </body>

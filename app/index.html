@@ -60,8 +60,8 @@
     <div id="selector"><div class="seltitle">SELECT PAGE</div><div class="selwheel"><div id="selitems"></div></div><div class="selhint">rotate to choose · press to select</div></div>
     <div id="intro">
       <div class="introicon">🔘</div>
-      <div class="introtitle">Double-click the knob to switch pages</div>
-      <div class="introsub">Use it any time to move between your launcher, dashboards, and apps.</div>
+      <div class="introtitle" id="introtitle">Double-click the knob to switch pages</div>
+      <div class="introsub" id="introsub">Use it any time to move between your launcher, dashboards, and apps.</div>
       <button class="introok" id="introok">OK</button>
     </div>
   </div>
@@ -70,6 +70,7 @@
   const grid = document.getElementById('grid'), vol = document.getElementById('vol'), web = document.getElementById('web');
   const selector = document.getElementById('selector'), selitems = document.getElementById('selitems');
   const intro = document.getElementById('intro'), introok = document.getElementById('introok');
+  const introtitle = document.getElementById('introtitle'), introsub = document.getElementById('introsub');
   let cfg = { cols: 8, rows: 2, tiles: [] };
   let grids = [], activeId = null, rotEnabled = false, rotRunning = false, introOpen = false;
   let knobRotateAction = 'volume';
@@ -167,9 +168,19 @@
   ipcRenderer.on('rotation', (e, r) => { rotEnabled = !!r.enabled; rotRunning = !!r.running; if (selOpen) renderWheel(); });
   ipcRenderer.on('settings', (e, s) => {
     knobRotateAction = s && s.knob && s.knob.rotateAction === 'pages' ? 'pages' : 'volume';
+    updateIntroCopy();
   });
 
   // ---- first-run intro overlay (one-time "double-click the knob" hint) ----
+  function updateIntroCopy() {
+    if (knobRotateAction === 'pages') {
+      introtitle.textContent = 'Rotate the knob to switch pages';
+      introsub.textContent = 'Turn it to open the page selector, then press the knob to choose.';
+    } else {
+      introtitle.textContent = 'Double-click the knob to switch pages';
+      introsub.textContent = 'Use it any time to move between your launcher, dashboards, and apps.';
+    }
+  }
   ipcRenderer.on('intro', () => { if (introOpen) return; introOpen = true; intro.classList.add('open'); });
   function dismissIntro() { if (!introOpen) return; introOpen = false; intro.classList.remove('open'); ipcRenderer.send('introDone'); }
   introok.addEventListener('click', dismissIntro);   // PC mouse
@@ -270,7 +281,8 @@
   // ---- knob ----
   // The knob does click-type detection in hardware: press index 1 = single-click, 2 = double-click.
   ipcRenderer.on('knob', (e, k) => {
-    if (introOpen) {   // teach by doing: a double-click clears the intro and opens the page menu; ignore other knob input
+    if (introOpen) {   // teach by doing: the configured page-switch gesture clears the intro and opens the page menu.
+      if (k.type === 'rotate' && knobRotateAction === 'pages') { dismissIntro(); openSelectorByKnob(k.dir); }
       if (k.type === 'press' && k.index === 2) { dismissIntro(); openSelector(); }
       return;
     }
