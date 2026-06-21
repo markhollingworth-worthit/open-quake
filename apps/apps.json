@@ -37,5 +37,19 @@
       { "key": "api_key",  "label": "API key",                                       "type": "secret", "default": "", "help": "In Open WebUI: avatar (bottom-left) → Settings → Account → API Keys → Create new secret key (an admin may need to enable API keys first in Admin Panel → Settings → General → turn Enable API Keys on)." },
       { "key": "model",    "label": "Model (required, e.g. llama3.2)",               "type": "text", "default": "" }
     ]
+  },
+  {
+    "id": "qnap",
+    "name": "QNAP NAS",
+    "file": "qnapview.html",
+    "served": true,
+    "options": [
+      { "key": "host", "label": "QNAP URL", "type": "text", "default": "https://192.168.0.1:443", "serverOnly": true, "help": "Use the NAS QTS URL, including http:// or https:// and the port if needed." },
+      { "key": "username", "label": "Username", "type": "text", "default": "", "serverOnly": true },
+      { "key": "password", "label": "Password", "type": "secret", "default": "", "serverOnly": true },
+      { "key": "verifySsl", "label": "Verify SSL", "type": "bool", "default": false, "serverOnly": true, "help": "Turn this off for a NAS using a self-signed certificate." },
+      { "key": "refreshSeconds", "label": "Refresh seconds", "type": "text", "default": "15", "serverOnly": true },
+      { "key": "debugErrors", "label": "Show API errors", "type": "bool", "default": false, "help": "Adds a bottom-row debug tile showing the latest local QNAP API error." }
+    ]
   }
 ]

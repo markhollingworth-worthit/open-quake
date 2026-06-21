@@ -120,6 +120,21 @@
       "kind": "web",
       "url": "https://demo.home-assistant.io/",
       "auth": { "type": "none" }
+    },
+    {
+      "id": "qnap",
+      "name": "QNAP NAS",
+      "kind": "app",
+      "app": "qnap",
+      "options": {
+        "host": "https://192.168.0.1:443",
+        "username": "",
+        "password": "",
+        "verifySsl": false,
+        "refreshSeconds": "15",
+        "debugErrors": false
+      },
+      "rotate": false
     }
   ]
 }

@@ -18,17 +18,55 @@ const fs = require('fs');
 const path = require('path');
 const metrics = require('./sysmetrics');
 const nowplaying = require('./nowplaying');
+const QnapClient = require('./qnapClient');
 
 const FALLBACK = '<!doctype html><meta charset="utf-8">'
   + '<body style="margin:0;background:#05080d;color:#9fb3c8;font:20px Segoe UI">page asset missing.</body>';
 const MEDIA_CMDS = { playpause: 1, next: 1, prev: 1, stop: 1 };
 
-let server = null, onMedia = null, onLaunch = null, getMusicTiles = null;
-let sysHtml = FALLBACK, musicHtml = FALLBACK, chatHtml = FALLBACK, chatJs = '', chatCss = '';
+let server = null, onMedia = null, onLaunch = null, getMusicTiles = null, getQnapOptions = null;
+let sysHtml = FALLBACK, musicHtml = FALLBACK, chatHtml = FALLBACK, qnapHtml = FALLBACK;
+let chatJs = '', chatCss = '', qnapJs = '', qnapCss = '';
+let qnapClient = null, qnapClientKey = '', qnapLastGood = null;
 
 function html(res, body) { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(body); }
 function json(res, obj) { res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); }
 function done(res, ok) { res.writeHead(ok ? 200 : 400, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify({ ok: !!ok })); }
+function asset(res, body, type) { res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' }); res.end(body); }
+function qnapConfigFromOptions(opts) {
+  opts = opts || {};
+  const refreshSeconds = Math.max(5, Math.min(300, parseInt(opts.refreshSeconds, 10) || 15));
+  return {
+    qnap: {
+      host: String(opts.host || '').replace(/\/+$/, ''),
+      username: String(opts.username || ''),
+      password: String(opts.password || ''),
+      verifySsl: !!opts.verifySsl,
+    },
+    dashboard: { refreshSeconds },
+  };
+}
+function activeQnapClient() {
+  const cfg = qnapConfigFromOptions(getQnapOptions ? getQnapOptions() : {});
+  const key = JSON.stringify(cfg.qnap);
+  if (!qnapClient || key !== qnapClientKey) {
+    qnapClient = new QnapClient(cfg);
+    qnapClientKey = key;
+    qnapLastGood = null;
+  } else {
+    qnapClient.config.dashboard = cfg.dashboard;
+  }
+  return qnapClient;
+}
+async function qnapSummary() {
+  const data = await activeQnapClient().getSummary();
+  if (data.ok) qnapLastGood = data;
+  else if (qnapLastGood) data.lastGood = qnapLastGood;
+  return data;
+}
+async function qnapResources() {
+  return activeQnapClient().getResources();
+}
 
 async function handler(req, res) {
   if (req.method !== 'GET') { res.writeHead(405); res.end(); return; }
@@ -37,10 +75,20 @@ async function handler(req, res) {
   if (url === '/' || url === '/index.html') return html(res, sysHtml);
   if (url === '/music') return html(res, musicHtml);
   if (url === '/chat') return html(res, chatHtml);
-  if (url === '/ChatWidget.js') { res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(chatJs); }
-  if (url === '/owui-widget.css') { res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(chatCss); }
+  if (url === '/qnap') return html(res, qnapHtml);
+  if (url === '/ChatWidget.js') return asset(res, chatJs, 'application/javascript; charset=utf-8');
+  if (url === '/owui-widget.css') return asset(res, chatCss, 'text/css; charset=utf-8');
+  if (url === '/qnap/qnapview.js') return asset(res, qnapJs, 'application/javascript; charset=utf-8');
+  if (url === '/qnap/qnapview.css') return asset(res, qnapCss, 'text/css; charset=utf-8');
   if (url === '/metrics') return json(res, metrics.getSnapshot());
   if (url === '/nowplaying') return json(res, nowplaying.getSnapshot());
+  if (url === '/api/qnap/summary' || url === '/api/qnap/status' || url === '/api/qnap/system-health') return json(res, await qnapSummary());
+  if (url === '/api/qnap/resources') return json(res, await qnapResources());
+  if (url === '/api/qnap/storage') { const s = await qnapSummary(); return json(res, s.storage); }
+  if (url === '/api/qnap/shares') { const s = await qnapSummary(); return json(res, s.shares); }
+  if (url === '/api/qnap/recent-files') { const s = await qnapSummary(); return json(res, s.recentFiles); }
+  if (url === '/api/qnap/network') { const s = await qnapSummary(); return json(res, s.network); }
+  if (url === '/api/qnap/services') { const s = await qnapSummary(); return json(res, s.services); }
   if (url === '/musictiles') {
     let t = { cols: 2, rows: 2, tiles: [] };
     if (getMusicTiles) { try { t = await getMusicTiles(); } catch (e) {} }
@@ -67,13 +115,17 @@ function start(opts) {
   onMedia = opts.onMedia || null;
   onLaunch = opts.onLaunch || null;
   getMusicTiles = opts.getMusicTiles || null;
+  getQnapOptions = opts.getQnapOptions || null;
   return new Promise((resolve, reject) => {
     if (server) return resolve(server.address().port);
     try { sysHtml = fs.readFileSync(path.join(__dirname, 'sysview.html'), 'utf8'); } catch (e) {}
     try { musicHtml = fs.readFileSync(path.join(__dirname, 'musicview.html'), 'utf8'); } catch (e) {}
     try { chatHtml = fs.readFileSync(path.join(__dirname, 'chatview.html'), 'utf8'); } catch (e) {}
+    try { qnapHtml = fs.readFileSync(path.join(__dirname, 'qnapview.html'), 'utf8'); } catch (e) {}
     try { chatJs = fs.readFileSync(path.join(__dirname, 'ChatWidget.js'), 'utf8'); } catch (e) {}
     try { chatCss = fs.readFileSync(path.join(__dirname, 'owui-widget.css'), 'utf8'); } catch (e) {}
+    try { qnapJs = fs.readFileSync(path.join(__dirname, 'qnapview.js'), 'utf8'); } catch (e) {}
+    try { qnapCss = fs.readFileSync(path.join(__dirname, 'qnapview.css'), 'utf8'); } catch (e) {}
     // NB: the pollers are NOT started here. They're gated by which panel page is shown — main.js
     // calls setActivePage() on every page switch so each poller runs only while its page is on screen.
     server = http.createServer((req, res) => { handler(req, res).catch(() => { try { res.writeHead(500); res.end(); } catch (e) {} }); });

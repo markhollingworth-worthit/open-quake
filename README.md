@@ -32,6 +32,8 @@ It gives you:
   transport + app grid), a **[System Monitor](docs/system-monitor.md)** (live
   CPU/GPU/RAM/disk/network/battery), and an **[Open WebUI chat](docs/ai-chat.md)** you can
   **talk to by holding the knob**. → [Apps](docs/apps.md)
+- **Optional QNAP dashboard** — a bundled, local PC-side, read-only app can show a QNAP NAS
+  monitoring panel without installing anything on the NAS. Configure it from the app page options.
 - **A PC-side editor** — build pages of tiles, merge adjacent tiles into larger buttons,
   drag-and-drop to rearrange, then **Save** to push to the panel. → [Editor](docs/editor.md)
 - **Settings** — choose how it launches, **auto-rotate** through pages on a timer, toggle

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1920,height=480,initial-scale=1">
+  <title>QNAP Open Quake Panel</title>
+  <link rel="stylesheet" href="/qnap/qnapview.css">
+</head>
+<body>
+  <main class="dashboard" id="dashboard" aria-label="QNAP Open Quake dashboard">
+    <header class="topbar" id="header"></header>
+
+    <section class="main-grid" aria-label="NAS monitoring cards">
+      <article class="card system-card" id="system-card"></article>
+      <article class="card storage-overview-card" id="storage-overview-card"></article>
+      <article class="card storage-pools-card" id="storage-pools-card"></article>
+      <article class="card network-card" id="network-card"></article>
+
+      <article class="card disk-health-card" id="disk-health-card"></article>
+      <article class="card shares-card" id="shares-card"></article>
+      <article class="card services-card" id="services-card"></article>
+    </section>
+
+    <footer class="footerbar" id="footer"></footer>
+  </main>
+  <script src="/qnap/qnapview.js"></script>
+</body>
+</html>
