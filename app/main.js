@@ -16,12 +16,13 @@ const DEFAULT_CONFIG_PATH = path.join(__dirname, 'config.default.json'); // bund
 const LEGACY_CONFIG_PATH = path.join(__dirname, 'config.json');          // pre-userData dev location, migrated once
 const APPS_DIR = path.join(__dirname, '..', 'apps').replace('app.asar', 'app.asar.unpacked'); // unpacked when packaged
 const LED_DEFAULT = { effect: 1, brightness: 200, speed: 128, hue: 128, sat: 255 }; // ring lighting fallback (effect 1 = Solid Color)
-const DEFAULT_SETTINGS = { launchMode: 'editor', micOnLaunch: false, lighting: Object.assign({}, LED_DEFAULT) };
+const DEFAULT_SETTINGS = { launchMode: 'editor', micOnLaunch: false, lighting: Object.assign({}, LED_DEFAULT), monitor: { knobTurn: 'scroll', knobTap: 'enter' } };
 let firstRun = false;     // set by loadConfig when there was no prior config (fresh install)
 let micState = false;     // current device mic state (LED follows it)
 let lastRingEffect = LED_DEFAULT.effect; // remembered so the tray on/off toggle can restore the prior effect
 let rotateRunning = false;               // screen-rotation runtime on/off (starts per settings on launch)
 let rotTimer = null;
+let monitorMode = false;                 // monitor mode: panel UI hidden so the device shows the Windows desktop (keepalive still runs)
 let sysserver = null;                    // SystemView/Music local server (lazy-required in whenReady)
 let serverPort = 0;                      // the local server's ephemeral port (for music-page routing)
 let config = loadConfig();
@@ -139,7 +140,8 @@ function gridList() { return config.grids.map(g => ({ id: g.id, name: g.name }))
 // (SystemView metrics / Music now-playing) and idles the rest — no background polling while hidden.
 function syncPollers(g) {
   if (!sysserver) return;
-  const which = (g && g.id === 'sysview') ? 'sysview'
+  const which = monitorMode ? null                                  // panel hidden (monitor mode) -> no page is visible, idle everything
+    : (g && g.id === 'sysview') ? 'sysview'
     : (g && g.kind === 'app' && g.app === 'music') ? 'music'
     : null;
   try { sysserver.setActivePage(which); } catch (e) {}
@@ -294,6 +296,7 @@ function runAction(a) {
       case 'system':
         if (a.value === 'lock') exec('rundll32.exe user32.dll,LockWorkStation');
         else if (a.value === 'mic') toggleMic();
+        else if (a.value === 'monitor') enterMonitorMode();   // hand the device screen to Windows; press the knob to return
         break;
     }
   } catch (e) { console.log('action error:', e.message); }
@@ -330,7 +333,7 @@ let panelShown = false, coverKey = '';
 // and the skip-guard requires fullscreen to have actually stuck — so an early/failed attempt self-corrects.
 function fitPanel(reason) {
   const d = deviceDisplay();
-  if (!d || !panelWin || panelWin.isDestroyed() || !panelShown) return;
+  if (!d || !panelWin || panelWin.isDestroyed() || !panelShown || monitorMode) return;   // don't re-cover the desktop while in monitor mode
   const b = d.bounds, key = [b.x, b.y, b.width, b.height, d.rotation].join(',');
   let fs = false; try { fs = panelWin.isSimpleFullScreen(); } catch (e) {}
   if (key === coverKey && fs) return;                              // already covering this exact geometry
@@ -342,6 +345,7 @@ function fitPanel(reason) {
     + ' rot=' + d.rotation + ' -> ' + JSON.stringify(panelWin.getBounds()) + ' fs=' + (() => { try { return panelWin.isSimpleFullScreen(); } catch (e) { return '?'; } })());
 }
 function placePanel() {
+  if (monitorMode) return;                                          // in monitor mode the panel stays hidden — don't re-show it over the desktop
   const d = deviceDisplay();
   if (!d) { console.log('placePanel: DK-QUAKE display not present'); return; }
   if (!panelWin || panelWin.isDestroyed()) {
@@ -360,6 +364,86 @@ function placePanel() {
       pushToPanel();
     });
   } else { panelWin.show(); fitPanel('replace'); pushToPanel(); }
+}
+
+// ---- monitor mode: use the device as a normal monitor ----
+// Drop the panel cover so the Windows desktop shows on the device. The driver keep-alive keeps pinging,
+// so the backlight stays lit — only the launcher window is hidden. The knob (or the tray) brings it back.
+function enterMonitorMode() {
+  if (monitorMode || !panelWin || panelWin.isDestroyed()) return;
+  monitorMode = true;
+  try { panelWin.setSimpleFullScreen(false); } catch (e) {}
+  panelWin.hide();
+  coverKey = '';                                                    // force a fresh fit when the panel comes back
+  syncPollers(null);                                               // nothing on the panel is visible -> idle the page pollers
+  try { dev.screenOn(); } catch (e) {}                             // keep the backlight on as the desktop takes over
+  refreshTray();
+  console.log('monitor mode: ON (panel hidden, desktop visible, keep-alive running)');
+}
+function exitMonitorMode(reason) {
+  if (!monitorMode) return;
+  monitorMode = false;
+  releaseTouch();                                                  // drop any held mouse button from an in-progress touch
+  if (panelWin && !panelWin.isDestroyed()) {
+    panelWin.setAlwaysOnTop(true); panelWin.show(); panelWin.focus();
+    setTimeout(() => { try { panelWin.setAlwaysOnTop(false); } catch (e) {} }, 1500);
+    fitPanel('monitor-exit');
+    setTimeout(() => fitPanel('monitor-settle'), 400);             // re-cover once geometry settles (no-op if already covering)
+  }
+  syncPollers(activeGrid());                                       // resume the active page's poller
+  refreshTray();
+  console.log('monitor mode: OFF (' + (reason || '') + ')');
+}
+function toggleMonitorMode() { monitorMode ? exitMonitorMode('tray') : enterMonitorMode(); }
+
+// Monitor-mode touch -> Windows cursor: tap = left-click, finger-drag = move with the button held, lift =
+// release. Maps the panel's bottom-left-origin coords (x:0..1920, y:0..480) into the device monitor's screen
+// position and drives the OS cursor via robotjs (same lib as knob-volume). A short idle timer releases the
+// button if the device never sends an explicit lift frame (mirrors the dashboard webTouch logic).
+let touchDown = false, touchIdle = null;
+function injectTouch(p) {
+  if (!robot) return;
+  const d = deviceDisplay(); if (!d) return;
+  const b = d.bounds;
+  const x = Math.round(b.x + Math.max(0, Math.min(1920, p.x)));
+  const y = Math.round(b.y + Math.max(0, Math.min(480, 480 - p.y)));   // device origin is bottom-left -> flip Y for the top-left screen
+  clearTimeout(touchIdle);
+  try {
+    if (p.action === 1) {
+      robot.moveMouse(x, y);
+      if (!touchDown) { touchDown = true; robot.mouseToggle('down', 'left'); }
+      touchIdle = setTimeout(releaseTouch, 140);
+    } else releaseTouch();
+  } catch (e) {}
+}
+function releaseTouch() {
+  clearTimeout(touchIdle);
+  if (touchDown) { touchDown = false; try { robot.mouseToggle('up', 'left'); } catch (e) {} }
+}
+
+// Knob behavior while in monitor mode (configured on the editor's Monitor tab). Turn -> volume or scroll;
+// single-tap -> Enter / right-click / mute. Double-tap and hold are unbound here; exit is tray-only.
+function monitorCfg() {
+  const m = (config.settings || {}).monitor || {};
+  return {
+    knobTurn: m.knobTurn === 'volume' ? 'volume' : 'scroll',                   // default: scroll
+    knobTap: ['leftclick', 'enter', 'rightclick', 'mute'].includes(m.knobTap) ? m.knobTap : 'enter',   // default: enter
+  };
+}
+function monitorKnob(k) {
+  if (!robot) return;
+  const m = monitorCfg();
+  try {
+    if (k.type === 'rotate') {
+      if (m.knobTurn === 'scroll') robot.scrollMouse(0, k.dir > 0 ? -120 : 120);   // 120 = one wheel notch per detent (needs the patched robotjs — see patches/)
+      else robot.keyTap(k.dir > 0 ? 'audio_vol_up' : 'audio_vol_down');
+    } else if (k.type === 'press' && k.index === 1) {                          // single-tap action
+      if (m.knobTap === 'leftclick') robot.mouseClick('left');
+      else if (m.knobTap === 'enter') robot.keyTap('enter');
+      else if (m.knobTap === 'rightclick') robot.mouseClick('right');
+      else robot.keyTap('audio_mute');
+    }
+  } catch (e) {}
 }
 
 function openConfigWindow() {
@@ -457,7 +541,8 @@ function trayMenu() {
   ];
   if (rotationCfg().enabled) items.push({ label: rotateRunning ? 'Auto-rotate: on — click to pause' : 'Auto-rotate: off — click to start', click: () => toggleRotation() });
   items.push(
-    { label: 'Re-place panel on device', click: () => { try { dev.screenOn(); } catch (e) {} placePanel(); } },
+    { label: monitorMode ? 'Monitor mode: on — click to return to panel' : 'Switch to monitor mode (use device as a normal monitor)', click: () => toggleMonitorMode() },
+    { label: 'Re-place panel on device', enabled: !monitorMode, click: () => { try { dev.screenOn(); } catch (e) {} placePanel(); } },
     { type: 'separator' },
     { label: 'Quit', click: () => { try { dev.stop(); } catch (e) {} app.quit(); } },
   );
@@ -581,8 +666,14 @@ app.whenReady().then(async () => {
   else if (ls.launchMode === 'minimized') { openConfigWindow(); if (configWin && !configWin.isDestroyed()) configWin.minimize(); }
   // 'tray' -> stay quiet (tray + panel only)
 
-  dev.on('touch', pts => { if (panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('touch', pts); });
-  dev.on('knob', k => { if (panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('knob', k); }); // panel owns knob logic
+  dev.on('touch', pts => {
+    if (monitorMode) { const p = pts.find(q => q.action === 1) || pts[0]; if (p) injectTouch(p); return; }   // monitor mode: touch drives the Windows cursor
+    if (panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('touch', pts);
+  });
+  dev.on('knob', k => {
+    if (monitorMode) return monitorKnob(k);                                    // monitor mode: knob does the configured turn/tap action (exit is tray-only)
+    if (panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('knob', k);   // panel owns knob logic
+  });
   dev.on('connect', async i => {
     console.log('connect:', i.iface);
     if (i.iface !== 'control') return;
