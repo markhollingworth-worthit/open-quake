@@ -25,17 +25,21 @@ Full reverse-engineered protocol: [DEVICE_PROTOCOL.md](DEVICE_PROTOCOL.md).
 > module scope."* If you hit that, `node --version`, switch to an LTS, delete `node_modules`, and
 > reinstall. (`package.json` declares `"engines": node >=18 <25`; an `.nvmrc` pins 24.)
 
-The native modules (`node-hid`, `robotjs`) must be built for this app's Electron
-ABI (**Electron 23**), *not* your host Node. A plain `npm install` fails —
-`robotjs` (0.6.0) can't compile against modern Node. So install without scripts,
-fetch the Electron binary, then rebuild the natives against Electron 23:
+The app's one compiled native module, **`node-hid`**, must be built for this app's
+Electron ABI (**Electron 42**), *not* your host Node. (`@jitsi/robotjs` ships
+ABI-stable **N-API** prebuilds, so it needs no rebuild.) A plain `npm install` tries
+to build natives against your host Node and can fail, so install without scripts,
+fetch the Electron binary, then rebuild `node-hid` against Electron 42:
 
 ```powershell
 npm install --ignore-scripts            # packages on disk, no native build
-node node_modules/electron/install.js   # fetch the Electron 23 binary
-npm run rebuild                          # electron-rebuild -v 23.0.0 -f  (node-hid + robotjs)
+node node_modules/electron/install.js   # fetch the Electron 42 binary
+npm run rebuild                          # electron-rebuild -v 42.4.1 -f --only node-hid
 npm start
 ```
+
+> If `npm install` fails with `EBUSY … electron.exe`, a copy of the app is still
+> running — close it first, then retry.
 
 Building the natives on modern Windows needs Visual Studio 2022 Build Tools
 (Desktop C++ workload) and a Python with `distutils` (`pip install
