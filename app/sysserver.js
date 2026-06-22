@@ -11,8 +11,9 @@
  *   GET /music       -> Music app page         GET /nowplaying   -> SMTC now-playing JSON
  *   GET /apps/<id>/… -> drop-in served app assets
  *   GET /musictiles  -> the active Music page's embedded 2x2 grid (resolved icons)
+ *   GET /apptiles    -> the active app page's embedded grid (resolved icons)
  *   GET /media/<cmd> -> transport (play/pause/next/prev/stop) via onMedia
- *   GET /launch?i=N  -> launch the active Music grid's tile N via onLaunch (runAction)
+ *   GET /launch?i=N  -> launch the active app grid's tile N via onLaunch (runAction)
  */
 const http = require('http');
 const fs = require('fs');
@@ -26,7 +27,7 @@ const FALLBACK = '<!doctype html><meta charset="utf-8">'
   + '<body style="margin:0;background:#05080d;color:#9fb3c8;font:20px Segoe UI">page asset missing.</body>';
 const MEDIA_CMDS = { playpause: 1, next: 1, prev: 1, stop: 1 };
 
-let server = null, onMedia = null, onLaunch = null, getMusicTiles = null, getQnapOptions = null;
+let server = null, onMedia = null, onLaunch = null, getMusicTiles = null, getAppTiles = null, getQnapOptions = null;
 let sysHtml = FALLBACK, musicHtml = FALLBACK, chatHtml = FALLBACK, qnapHtml = FALLBACK;
 let chatJs = '', chatCss = '', qnapJs = '', qnapCss = '';
 let qnapClient = null, qnapClientKey = '', qnapLastGood = null;
@@ -141,6 +142,11 @@ async function handler(req, res) {
     if (getMusicTiles) { try { t = await getMusicTiles(); } catch (e) {} }
     return json(res, t);
   }
+  if (url === '/apptiles') {
+    let t = { cols: 1, rows: 1, tiles: [] };
+    if (getAppTiles) { try { t = await getAppTiles(); } catch (e) {} }
+    return json(res, t);
+  }
   if (url.indexOf('/media/') === 0) {
     const cmd = url.slice(7);
     let ok = false;
@@ -156,12 +162,13 @@ async function handler(req, res) {
   res.writeHead(404); res.end();
 }
 
-// opts: { onMedia(cmd), onLaunch(i), getMusicTiles() } — all optional.
+// opts: { onMedia(cmd), onLaunch(i), getMusicTiles(), getAppTiles() } — all optional.
 function start(opts) {
   opts = opts || {};
   onMedia = opts.onMedia || null;
   onLaunch = opts.onLaunch || null;
   getMusicTiles = opts.getMusicTiles || null;
+  getAppTiles = opts.getAppTiles || null;
   getQnapOptions = opts.getQnapOptions || null;
   servedAppDirs = new Map();
   (opts.servedApps || []).forEach(a => {

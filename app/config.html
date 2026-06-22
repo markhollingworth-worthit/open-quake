@@ -122,7 +122,7 @@
   }
   const appIconCache = {};   // app value -> dataURL | false (failed) | null (in-flight)
   const urlIconPreview = {}; // iconCache path -> dataURL of a just-fetched URL icon (editor preview only; dodges file:// browser-cache staleness on Refresh)
-  const TYPES = [['', 'Empty'], ['app', 'App / Program'], ['url', 'Website (URL)'], ['page', 'Go to open-quake page'], ['cmd', 'Shell command'], ['open', 'Open file/folder'], ['system', 'System (lock/config)']];
+  const TYPES = [['', 'Empty'], ['app', 'App / Program'], ['url', 'Website (URL)'], ['page', 'Go to open-quake page'], ['key', 'Key press'], ['cmd', 'Shell command'], ['open', 'Open file/folder'], ['system', 'System (lock/config)']];
   const uid = () => 'g' + Math.random().toString(36).slice(2, 8);
   const curGrid = () => config.grids[gi];
   const esc = s => (s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -146,6 +146,58 @@
   const urlSrc = t => urlIconPreview[t.iconCache] || fileUrl(t.iconCache);   // URL-icon source: fresh fetch preview, else the cached file
   const baseName = p => p.split(/[\\/]/).pop().replace(/\.(exe|lnk|bat|cmd|com)$/i, '');
   const iconTypeOf = t => t.iconType || 'emoji';
+  const keyNameMap = { ' ': 'space', '+': 'plus', Escape: 'escape', Esc: 'escape', Enter: 'enter', Return: 'enter', Backspace: 'backspace', Tab: 'tab', Delete: 'delete', Insert: 'insert', Home: 'home', End: 'end', PageUp: 'pageup', PageDown: 'pagedown', ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+  function keyNameFromEvent(e) {
+    if (keyNameMap[e.key]) return keyNameMap[e.key];
+    if (/^F\d{1,2}$/i.test(e.key)) return e.key.toLowerCase();
+    if (/^(Digit|Numpad)(\d)$/.test(e.code)) return RegExp.$2;
+    if (/^Key[A-Z]$/.test(e.code)) return e.code.slice(3).toLowerCase();
+    if (e.key && e.key.length === 1) return e.key.toLowerCase();
+    return (e.key || '').toLowerCase();
+  }
+  function comboFromEvent(e) {
+    const mods = [];
+    if (e.ctrlKey) mods.push('ctrl');
+    if (e.altKey) mods.push('alt');
+    if (e.shiftKey) mods.push('shift');
+    if (e.metaKey) mods.push('win');
+    const key = keyNameFromEvent(e);
+    if (!key || ['control', 'ctrl', 'alt', 'shift', 'meta', 'win'].includes(key)) return mods.join('+');
+    return mods.concat(key).join('+');
+  }
+  function recordKeyCombo(t) {
+    const btn = document.getElementById('tRecordKey');
+    const input = document.getElementById('tValue');
+    if (!btn || !input) return;
+    const old = btn.textContent;
+    btn.textContent = 'Press keys...';
+    let active = true;
+    let cancelClick = null;
+    const cleanup = () => {
+      active = false;
+      btn.textContent = old;
+      document.removeEventListener('keydown', onKey, true);
+      if (cancelClick) document.removeEventListener('mousedown', cancelClick, true);
+    };
+    const onKey = e => {
+      e.preventDefault(); e.stopPropagation();
+      const combo = comboFromEvent(e);
+      if (!combo) return;
+      t.value = combo;
+      input.value = combo;
+      cleanup();
+      renderTiles(); markDirty();
+    };
+    document.addEventListener('keydown', onKey, true);
+    setTimeout(() => {
+      if (!active) return;
+      cancelClick = ev => {
+        if (ev.target === btn) return;
+        cleanup();
+      };
+      document.addEventListener('mousedown', cancelClick, true);
+    }, 0);
+  }
 
   // ---- screen-rotation per-page opt-in ----
   function rotCatOn(g) { const c = (config.settings && config.settings.rotation && config.settings.rotation.cats) || {}; return !!c[g.kind === 'web' ? 'dashboards' : g.kind === 'app' ? 'apps' : 'grids']; }
@@ -299,7 +351,7 @@
   }
   function unmergeTile(g) { flattenAt(g, ti); selEnd = -1; render(); markDirty(); }
   function swapTiles(g, a, b) { const t = g.tiles[a]; g.tiles[a] = g.tiles[b]; g.tiles[b] = t; ti = b; selEnd = -1; render(); markDirty(); }
-  function tileFields(t) { return { label: (t && t.label) || '', icon: (t && t.icon) || '', type: (t && t.type) || '', value: (t && t.value) || '', iconType: (t && t.iconType) || 'emoji', iconImage: (t && t.iconImage) || '', iconUrl: (t && t.iconUrl) || '', iconCache: (t && t.iconCache) || '' }; }
+  function tileFields(t) { return { label: (t && t.label) || '', icon: (t && t.icon) || '', type: (t && t.type) || '', value: (t && t.value) || '', focusUrl: (t && t.focusUrl) || '', focusDelayMs: (t && t.focusDelayMs) || '', iconType: (t && t.iconType) || 'emoji', iconImage: (t && t.iconImage) || '', iconUrl: (t && t.iconUrl) || '', iconCache: (t && t.iconCache) || '' }; }
   function handleDrop(g, from, to) {
     if (from < 0 || from === to) return;
     const sf = g.tiles[from], sw = (sf && sf.w) || 1, sh = (sf && sf.h) || 1;
@@ -340,9 +392,9 @@
       <p class="sectitle">Tile ${ti + 1}</p>
       <div class="row"><label>Label</label><input id="tLabel" value="${esc(t.label)}"></div>
       <div class="row"><label>Type</label><select id="tType">${TYPES.map(([v, n]) => `<option value="${v}" ${v === (t.type || '') ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
-      <div class="row"><label>${t.type === 'page' ? 'Page' : 'Value'}</label>${t.type === 'page'
+      <div class="row"><label>${t.type === 'page' ? 'Page' : t.type === 'key' ? 'Keys' : 'Value'}</label>${t.type === 'page'
         ? pageSelectHtml(t)
-        : `<input id="tValue" value="${esc(t.value)}" placeholder="${valuePlaceholder(t.type)}"><button id="tBrowse" ${t.type === 'app' || t.type === 'open' ? '' : 'style="display:none"'}>Browse…</button>`}</div>
+        : `<input id="tValue" value="${esc(t.value)}" placeholder="${valuePlaceholder(t.type)}"><button id="tBrowse" ${t.type === 'app' || t.type === 'open' ? '' : 'style="display:none"'}>Browse…</button><button id="tRecordKey" ${t.type === 'key' ? '' : 'style="display:none"'}>Record</button>`}</div>
       <div class="row"><button class="danger" id="tClear">Clear tile</button></div>
       <p class="hint">${typeHint(t.type)}</p>
     </div>`;
@@ -355,6 +407,8 @@
     document.getElementById('tClear').onclick = () => { flattenAt(g, ti); g.tiles[ti] = blankTile(); render(); markDirty(); };
     const br = document.getElementById('tBrowse');
     if (br) br.onclick = async () => { const p = await ipcRenderer.invoke('pickProgram'); if (p) { t.value = p; if (!t.label) t.label = baseName(p); render(); markDirty(); } };
+    const kr = document.getElementById('tRecordKey');
+    if (kr) kr.onclick = () => recordKeyCombo(t);
     renderIconPane();
   }
 
@@ -425,7 +479,7 @@
     else el.innerHTML = t.icon ? `<span class="em">${t.icon}</span>` : `<span class="none">no emoji</span>`;
   }
 
-  function valuePlaceholder(type) { return type === 'url' ? 'https://…' : type === 'app' ? 'chrome  (or full path)' : type === 'cmd' ? 'start ms-settings:' : type === 'system' ? 'lock  |  config  |  mic  |  monitor' : ''; }
+  function valuePlaceholder(type) { return type === 'url' ? 'https://…' : type === 'app' ? 'chrome  (or full path)' : type === 'key' ? 'ctrl+shift+s  or  enter' : type === 'cmd' ? 'start ms-settings:' : type === 'system' ? 'lock  |  config  |  mic  |  monitor' : ''; }
   function pageSelectHtml(t) {
     const others = (config.grids || []).filter(g => g.id !== curGrid().id);
     if (!others.length) return '<span class="hint">No other pages to link to yet — add one first.</span>';
@@ -435,6 +489,7 @@
     if (type === 'app') return 'Program name on PATH (chrome, notepad…) or a full .exe path via Browse.';
     if (type === 'url') return 'Opens in your default browser.';
     if (type === 'page') return 'Tapping (or clicking) this tile switches the panel to the chosen page.';
+    if (type === 'key') return 'Sends a keyboard press to Windows. Use Record, or type combos like ctrl+c, alt+tab, win+d, shift+f5, or enter.';
     if (type === 'cmd') return 'Runs a shell command (advanced).';
     if (type === 'system') return 'lock = lock screen · config = open this editor · mic = toggle the device mic · monitor = hide the panel and use the device as a normal monitor (press the knob to return).';
     return '';
@@ -540,9 +595,23 @@
       if (!g.name || g.name === 'App' || (prev && g.name === prev.name)) g.name = def.name;  // auto-name from the app
       if (def.grid) {                                       // app embeds a programmable tile grid — seed it
         g.cols = def.grid.cols || 2; g.rows = def.grid.rows || 2;
-        if (!Array.isArray(g.tiles) || !g.tiles.length) g.tiles = (def.grid.defaults || []).map(t => Object.assign({}, t));
+        if (!Array.isArray(g.tiles) || !g.tiles.length) g.tiles = gridDefaultsFor(def, g).map(t => Object.assign({}, t));
       }
     }
+  }
+  function gridDefaultsFor(def, g) {
+    const grid = (def && def.grid) || {};
+    const optKey = grid.profileOption;
+    const profile = optKey && g && g.options ? g.options[optKey] : null;
+    return (grid.profiles && profile && grid.profiles[profile]) || grid.defaults || [];
+  }
+  function applyGridProfile(g, def, profile) {
+    if (!(def && def.grid && def.grid.profiles && def.grid.profiles[profile])) return false;
+    g.cols = def.grid.cols || g.cols || 2;
+    g.rows = def.grid.rows || g.rows || 2;
+    g.tiles = def.grid.profiles[profile].map(t => Object.assign({}, t));
+    ti = -1; selEnd = -1;
+    return true;
   }
   function renderAppOpts(g, def) {
     const el = document.getElementById('appOpts'); if (!el) return;
@@ -560,7 +629,9 @@
     }).join('');
     el.querySelectorAll('.aopt').forEach(inp => inp.onchange = e => {
       const o = (def.options || []).find(x => x.key === e.target.dataset.key);
-      g.options[e.target.dataset.key] = (o && o.type === 'bool') ? e.target.checked : e.target.value;
+      const key = e.target.dataset.key;
+      g.options[key] = (o && o.type === 'bool') ? e.target.checked : e.target.value;
+      if (def.grid && def.grid.profileOption === key && applyGridProfile(g, def, g.options[key])) { render(); markDirty(); return; }
       markDirty();
     });
   }

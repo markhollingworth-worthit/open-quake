@@ -55,6 +55,7 @@ function migrateConfig(c) {
       delete g.haToken;
     }
   });
+  ensureConfiguredAppGrids(c);
   return c;
 }
 // SystemView is a built-in localhost dashboard. Ensure the page exists and its url points at the
@@ -131,16 +132,55 @@ function ensureMusicPage() {
 }
 // The Music app's embedded grid is served to the page (resolved icons) and its taps launched, both
 // keyed to whichever music page is currently shown.
+function appHasGrid(g) {
+  if (!(g && g.kind === 'app' && g.app)) return false;
+  const def = loadApps().find(a => a.id === g.app);
+  return !!(def && def.grid);
+}
+function appGridDefaults(def, g) {
+  const grid = (def && def.grid) || {};
+  const optKey = grid.profileOption;
+  const profile = optKey && g && g.options ? g.options[optKey] : null;
+  return (grid.profiles && profile && grid.profiles[profile]) || grid.defaults || [];
+}
+function ensureAppGrid(g) {
+  if (!(g && g.kind === 'app' && g.app)) return false;
+  const def = loadApps().find(a => a.id === g.app);
+  if (!(def && def.grid)) return false;
+  const defaults = appGridDefaults(def, g);
+  const desired = (def.grid.cols || 1) * (def.grid.rows || 1);
+  const mustSync = !!def.hideGridInEditor;
+  const missing = !Array.isArray(g.tiles) || !g.tiles.length || g.tiles.length < desired;
+  if (!mustSync && !missing) return false;
+  g.cols = def.grid.cols || g.cols || 1;
+  g.rows = def.grid.rows || g.rows || 1;
+  g.tiles = defaults.map(t => Object.assign({}, t));
+  while (g.tiles.length < desired) g.tiles.push({ label: '', icon: '', type: '', value: '' });
+  g.tiles.length = desired;
+  return true;
+}
+function ensureConfiguredAppGrids(c) {
+  let changed = false;
+  (c && c.grids || []).forEach(g => { if (ensureAppGrid(g)) changed = true; });
+  return changed;
+}
+async function getActiveAppTiles() {
+  const g = activeGrid();
+  if (!appHasGrid(g)) return { cols: 1, rows: 1, tiles: [] };
+  ensureAppGrid(g);
+  const resolved = await resolveGridIcons(Object.assign({}, g, { kind: 'grid' }));   // resolve icons (force the tile path)
+  return { cols: g.cols || 1, rows: g.rows || 1, tiles: resolved.tiles || [] };
+}
+function onAppGridLaunch(i) {
+  const g = activeGrid();
+  ensureAppGrid(g);
+  if (appHasGrid(g) && g.tiles && g.tiles[i]) { runAction(g.tiles[i]); return true; }
+  return false;
+}
 async function getMusicTiles() {
   const g = activeGrid();
   if (!(g && g.kind === 'app' && g.app === 'music')) return { cols: 2, rows: 2, tiles: [] };
-  const resolved = await resolveGridIcons(Object.assign({}, g, { kind: 'grid' }));   // resolve icons (force the tile path)
-  return { cols: g.cols || 2, rows: g.rows || 2, tiles: resolved.tiles || [] };
-}
-function onMusicLaunch(i) {
-  const g = activeGrid();
-  if (g && g.kind === 'app' && g.app === 'music' && g.tiles && g.tiles[i]) { runAction(g.tiles[i]); return true; }
-  return false;
+  return getActiveAppTiles();
 }
 function getQnapOptions() {
   const g = activeGrid();
@@ -189,6 +229,16 @@ function loadApps() {
   });
 
   return apps;
+}
+function appsForEditor() {
+  return loadApps().map(def => {
+    if (def && def.hideGridInEditor) {
+      const out = Object.assign({}, def);
+      delete out.grid;
+      return out;
+    }
+    return def;
+  });
 }
 // Build the file: URL for an app page, encoding its options as a #hash (file:// drops a ?query).
 function appPageUrl(page) {
@@ -365,6 +415,54 @@ function resolveAppPath(value) {
   });
 }
 
+const KEY_ALIASES = {
+  ctrl: 'control', ctl: 'control', control: 'control',
+  cmd: 'command', command: 'command', meta: 'command', win: 'command', windows: 'command', super: 'command',
+  esc: 'escape', escape: 'escape',
+  return: 'enter', enter: 'enter',
+  spacebar: 'space', space: 'space',
+  del: 'delete', delete: 'delete',
+  ins: 'insert', insert: 'insert',
+  pgup: 'pageup', pageup: 'pageup',
+  pgdn: 'pagedown', pagedown: 'pagedown',
+  arrowup: 'up', up: 'up',
+  arrowdown: 'down', down: 'down',
+  arrowleft: 'left', left: 'left',
+  arrowright: 'right', right: 'right',
+  plus: '+',
+};
+const KEY_MODIFIERS = new Set(['alt', 'command', 'control', 'shift']);
+function normalizeKeyPart(part) {
+  const p = String(part || '').trim().toLowerCase();
+  return KEY_ALIASES[p] || p;
+}
+function parseKeyCombo(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const parts = raw.split('+').map(normalizeKeyPart).filter(Boolean);
+  const modifiers = [];
+  let key = '';
+  parts.forEach(p => {
+    if (KEY_MODIFIERS.has(p)) {
+      if (!modifiers.includes(p)) modifiers.push(p);
+    } else key = p;
+  });
+  if (!key && modifiers.length) key = modifiers.pop();
+  return key ? { key, modifiers } : null;
+}
+function sendKeyCombo(value) {
+  if (!robot) return false;
+  const combo = parseKeyCombo(value);
+  if (!combo) return false;
+  try {
+    robot.keyTap(combo.key, combo.modifiers);
+    return true;
+  } catch (e) {
+    console.log('key action error:', e.message);
+    return false;
+  }
+}
+
 function runAction(a) {
   if (!a || !a.type) return;
   if (a.type === 'system' && a.value === 'config') return openConfigWindow();
@@ -375,6 +473,7 @@ function runAction(a) {
       case 'app': exec(`start "" "${a.value}"`, { windowsHide: true }); break;
       case 'cmd': exec(a.value, { windowsHide: true }); break;
       case 'open': shell.openPath(a.value); break;
+      case 'key': sendKeyCombo(a.value); break;
       case 'page': gotoGrid(a.value, true); if (rotateRunning) scheduleRotation(); break;   // switch the panel to another page
       case 'system':
         if (a.value === 'lock') exec('rundll32.exe user32.dll,LockWorkStation');
@@ -529,8 +628,15 @@ function monitorKnob(k) {
   } catch (e) {}
 }
 
+function showAndFocusWindow(win) {
+  if (!win || win.isDestroyed()) return;
+  try { if (win.isMinimized()) win.restore(); } catch (e) {}
+  try { win.show(); } catch (e) {}
+  try { win.focus(); } catch (e) {}
+}
+
 function openConfigWindow() {
-  if (configWin && !configWin.isDestroyed()) { configWin.show(); configWin.focus(); return; }
+  if (configWin && !configWin.isDestroyed()) { showAndFocusWindow(configWin); return; }
   const prim = screen.getPrimaryDisplay().bounds;
   configWin = new BrowserWindow({
     width: 1180, height: 760, x: prim.x + 80, y: prim.y + 60, title: 'open-quake Editor',
@@ -650,7 +756,7 @@ if (!app.requestSingleInstanceLock()) {
 app.on('second-instance', () => {
   try { dev.screenOn(); } catch (e) {}
   placePanel();
-  if (configWin && !configWin.isDestroyed()) { configWin.show(); configWin.focus(); }
+  if (configWin && !configWin.isDestroyed()) showAndFocusWindow(configWin);
   else openConfigWindow();
 });
 
@@ -661,9 +767,9 @@ app.whenReady().then(async () => {
   // Lazy-required so a metrics/load failure can never crash the rest of the app.
   try {
     sysserver = require('./sysserver');
-    serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onMusicLaunch, getMusicTiles, getQnapOptions, servedApps: loadApps().filter(a => a.served) });
+    serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onAppGridLaunch, getMusicTiles, getAppTiles: getActiveAppTiles, getQnapOptions, servedApps: loadApps().filter(a => a.served) });
     ensureSystemViewPage(serverPort); ensureMusicPage(); ensureQnapPage();
-    console.log('SystemView + Music on http://127.0.0.1:' + serverPort);
+    console.log('local panel services on http://127.0.0.1:' + serverPort);
   } catch (e) { console.log('local panel services failed to start:', e.message); }
   sweepIconCache();   // clean up orphaned URL-icon cache files left by prior sessions
 
@@ -699,11 +805,12 @@ app.whenReady().then(async () => {
   ipcMain.on('introDone', () => { config.introShown = true; saveConfig(); });   // remember the intro was dismissed
   ipcMain.on('openExternal', (e, url) => { try { if (typeof url === 'string' && /^https?:/i.test(url)) shell.openExternal(url); } catch (er) {} });
   ipcMain.handle('getConfig', () => config);
-  ipcMain.handle('getApps', () => loadApps());
+  ipcMain.handle('getApps', () => appsForEditor());
   ipcMain.on('saveConfigFromEditor', (e, newCfg) => {
     const active = config.activeGridId;                          // the knob owns the live page — editor edits never change it
     const wasRot = rotationCfg().enabled;                        // detect a fresh off->on to auto-start (else keep the runtime pause)
     config = newCfg;
+    ensureConfiguredAppGrids(config);
     if (config.grids.some(g => g.id === active)) config.activeGridId = active;
     else if (!config.grids.some(g => g.id === config.activeGridId)) config.activeGridId = (config.grids[0] || {}).id || null;
     saveConfig(); pushToPanel(); applyKnobSettings(); refreshTray(); applyRotationSettings(wasRot);
