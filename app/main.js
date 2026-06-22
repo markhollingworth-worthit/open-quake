@@ -147,10 +147,47 @@ function getQnapOptions() {
 }
 function hostMatches(a, b) { try { return new URL(a).host === new URL(b).host; } catch (e) { return false; } }
 
-// Bundled local apps (apps/apps.json) — name, file, and an options schema the editor renders.
+function safeId(s) { return /^[a-z0-9][a-z0-9_-]*$/i.test(String(s || '')); }
+function normalizeAppDef(def, baseDir) {
+  if (!def || !safeId(def.id) || !def.name) return null;
+  const out = Object.assign({}, def);
+  if (baseDir) out.baseDir = baseDir;
+  out.entry = out.entry || out.file || 'index.html';
+  out.file = out.file || out.entry;
+  if (!Array.isArray(out.options)) out.options = [];
+  if (out.entry && (path.isAbsolute(out.entry) || out.entry.split(/[\\/]/).includes('..'))) return null;
+  if (out.file && (path.isAbsolute(out.file) || out.file.split(/[\\/]/).includes('..'))) return null;
+  return out;
+}
+function readJsonFile(file) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
+  catch (e) { console.log('apps manifest load error:', file, e.message); return null; }
+}
+// Bundled local apps — legacy apps/apps.json plus drop-in folders with app.json/manifest.json.
 function loadApps() {
-  try { return JSON.parse(fs.readFileSync(path.join(APPS_DIR, 'apps.json'), 'utf8')); }
-  catch (e) { console.log('apps manifest load error:', e.message); return []; }
+  const apps = [];
+  const seen = new Set();
+  const add = (def, baseDir) => {
+    const appDef = normalizeAppDef(def, baseDir);
+    if (!appDef) return;
+    if (seen.has(appDef.id)) { console.log('apps manifest duplicate id skipped:', appDef.id); return; }
+    seen.add(appDef.id); apps.push(appDef);
+  };
+
+  const legacy = readJsonFile(path.join(APPS_DIR, 'apps.json'));
+  if (Array.isArray(legacy)) legacy.forEach(def => add(def, null));
+
+  let entries = [];
+  try { entries = fs.readdirSync(APPS_DIR, { withFileTypes: true }); } catch (e) {}
+  entries.filter(d => d.isDirectory()).forEach(d => {
+    const baseDir = path.join(APPS_DIR, d.name);
+    const manifest = ['app.json', 'manifest.json'].map(f => path.join(baseDir, f)).find(f => fs.existsSync(f));
+    if (!manifest) return;
+    const def = readJsonFile(manifest);
+    if (def) add(def, baseDir);
+  });
+
+  return apps;
 }
 // Build the file: URL for an app page, encoding its options as a #hash (file:// drops a ?query).
 function appPageUrl(page) {
@@ -165,9 +202,10 @@ function appPageUrl(page) {
       if (o.type === 'bool') v = v ? '1' : '0';
       return encodeURIComponent(o.key) + '=' + encodeURIComponent(v);
     }).filter(Boolean).join('&');
-    return 'http://127.0.0.1:' + serverPort + '/' + def.id + (qs ? '?' + qs : '');
+    const route = def.baseDir ? '/apps/' + encodeURIComponent(def.id) + '/' + encodeURI(def.entry || 'index.html') : '/' + def.id;
+    return 'http://127.0.0.1:' + serverPort + route + (qs ? '?' + qs : '');
   }
-  const file = path.join(APPS_DIR, def.file);
+  const file = path.join(def.baseDir || APPS_DIR, def.entry || def.file);
   const opts = page.options || {};
   const hash = (def.options || []).map(o => {
     let v = (o.key in opts) ? opts[o.key] : o.default;
@@ -508,7 +546,7 @@ app.whenReady().then(async () => {
   // Lazy-required so a metrics/load failure can never crash the rest of the app.
   try {
     sysserver = require('./sysserver');
-    serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onMusicLaunch, getMusicTiles, getQnapOptions });
+    serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onMusicLaunch, getMusicTiles, getQnapOptions, servedApps: loadApps().filter(a => a.served) });
     ensureSystemViewPage(serverPort); ensureMusicPage(); ensureQnapPage();
     console.log('SystemView + Music on http://127.0.0.1:' + serverPort);
   } catch (e) { console.log('local panel services failed to start:', e.message); }

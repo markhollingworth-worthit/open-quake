@@ -1,0 +1,20 @@
+{
+  "id": "my-app",
+  "name": "My App",
+  "entry": "index.html",
+  "served": false,
+  "options": [
+    {
+      "key": "accent",
+      "label": "Accent color",
+      "type": "text",
+      "default": "#7CFFB2"
+    },
+    {
+      "key": "message",
+      "label": "Message",
+      "type": "text",
+      "default": "Hello from a drop-in app"
+    }
+  ]
+}

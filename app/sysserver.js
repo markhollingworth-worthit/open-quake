@@ -9,6 +9,7 @@
  * Routes:
  *   GET /            -> SystemView page        GET /metrics      -> system metrics JSON
  *   GET /music       -> Music app page         GET /nowplaying   -> SMTC now-playing JSON
+ *   GET /apps/<id>/… -> drop-in served app assets
  *   GET /musictiles  -> the active Music page's embedded 2x2 grid (resolved icons)
  *   GET /media/<cmd> -> transport (play/pause/next/prev/stop) via onMedia
  *   GET /launch?i=N  -> launch the active Music grid's tile N via onLaunch (runAction)
@@ -20,6 +21,7 @@ const metrics = require('./sysmetrics');
 const nowplaying = require('./nowplaying');
 const QnapClient = require('./qnapClient');
 
+const APPS_DIR = path.join(__dirname, '..', 'apps').replace('app.asar', 'app.asar.unpacked');
 const FALLBACK = '<!doctype html><meta charset="utf-8">'
   + '<body style="margin:0;background:#05080d;color:#9fb3c8;font:20px Segoe UI">page asset missing.</body>';
 const MEDIA_CMDS = { playpause: 1, next: 1, prev: 1, stop: 1 };
@@ -28,11 +30,55 @@ let server = null, onMedia = null, onLaunch = null, getMusicTiles = null, getQna
 let sysHtml = FALLBACK, musicHtml = FALLBACK, chatHtml = FALLBACK, qnapHtml = FALLBACK;
 let chatJs = '', chatCss = '', qnapJs = '', qnapCss = '';
 let qnapClient = null, qnapClientKey = '', qnapLastGood = null;
+let servedAppDirs = new Map();
 
 function html(res, body) { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(body); }
 function json(res, obj) { res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); }
 function done(res, ok) { res.writeHead(ok ? 200 : 400, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify({ ok: !!ok })); }
 function asset(res, body, type) { res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' }); res.end(body); }
+function mimeFor(file) {
+  const ext = path.extname(file).toLowerCase();
+  if (ext === '.html' || ext === '.htm') return 'text/html; charset=utf-8';
+  if (ext === '.css') return 'text/css; charset=utf-8';
+  if (ext === '.js' || ext === '.mjs') return 'application/javascript; charset=utf-8';
+  if (ext === '.json') return 'application/json; charset=utf-8';
+  if (ext === '.svg') return 'image/svg+xml';
+  if (ext === '.png') return 'image/png';
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.gif') return 'image/gif';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.ico') return 'image/x-icon';
+  if (ext === '.woff') return 'font/woff';
+  if (ext === '.woff2') return 'font/woff2';
+  return 'application/octet-stream';
+}
+function insideDir(parent, child) {
+  const a = path.resolve(parent).toLowerCase();
+  const b = path.resolve(child).toLowerCase();
+  return b === a || b.startsWith(a + path.sep);
+}
+function serveDropInApp(reqUrl, res) {
+  const m = /^\/apps\/([^/]+)(?:\/(.*))?$/.exec(reqUrl);
+  if (!m) return false;
+  const id = decodeURIComponent(m[1]);
+  const appDef = servedAppDirs.get(id);
+  if (!appDef) { res.writeHead(404); res.end(); return true; }
+  let rel = m[2] ? decodeURIComponent(m[2]) : (appDef.entry || 'index.html');
+  if (!rel || rel.endsWith('/')) rel += 'index.html';
+  if (rel.indexOf('\0') >= 0 || path.isAbsolute(rel) || rel.split(/[\\/]/).includes('..')) {
+    res.writeHead(400); res.end(); return true;
+  }
+  const baseDir = appDef.baseDir || path.join(APPS_DIR, id);
+  const file = path.resolve(baseDir, rel);
+  if (!insideDir(baseDir, file)) { res.writeHead(403); res.end(); return true; }
+  try {
+    const stat = fs.statSync(file);
+    if (!stat.isFile()) { res.writeHead(404); res.end(); return true; }
+    return asset(res, fs.readFileSync(file), mimeFor(file)), true;
+  } catch (e) {
+    res.writeHead(404); res.end(); return true;
+  }
+}
 function qnapConfigFromOptions(opts) {
   opts = opts || {};
   const refreshSeconds = Math.max(5, Math.min(300, parseInt(opts.refreshSeconds, 10) || 15));
@@ -80,6 +126,7 @@ async function handler(req, res) {
   if (url === '/owui-widget.css') return asset(res, chatCss, 'text/css; charset=utf-8');
   if (url === '/qnap/qnapview.js') return asset(res, qnapJs, 'application/javascript; charset=utf-8');
   if (url === '/qnap/qnapview.css') return asset(res, qnapCss, 'text/css; charset=utf-8');
+  if (serveDropInApp(url, res)) return;
   if (url === '/metrics') return json(res, metrics.getSnapshot());
   if (url === '/nowplaying') return json(res, nowplaying.getSnapshot());
   if (url === '/api/qnap/summary' || url === '/api/qnap/status' || url === '/api/qnap/system-health') return json(res, await qnapSummary());
@@ -116,6 +163,10 @@ function start(opts) {
   onLaunch = opts.onLaunch || null;
   getMusicTiles = opts.getMusicTiles || null;
   getQnapOptions = opts.getQnapOptions || null;
+  servedAppDirs = new Map();
+  (opts.servedApps || []).forEach(a => {
+    if (a && a.id && a.baseDir) servedAppDirs.set(a.id, { baseDir: a.baseDir, entry: a.entry || a.file || 'index.html' });
+  });
   return new Promise((resolve, reject) => {
     if (server) return resolve(server.address().port);
     try { sysHtml = fs.readFileSync(path.join(__dirname, 'sysview.html'), 'utf8'); } catch (e) {}

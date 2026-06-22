@@ -518,13 +518,14 @@
       <div class="row"><label>App</label><select id="gApp">
         <option value="">— choose an app —</option>
         ${appDefs.map(a => `<option value="${esc(a.id)}" ${a.id === g.app ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}
-      </select></div>
+      </select><button id="refreshApps" type="button" title="Refresh app list">Refresh</button></div>
       <div id="appOpts"></div>
       ${rotRowHtml(g)}
       <div class="row" style="margin-top:10px"><button class="danger" id="gDelete">Delete page</button></div>
       <p class="hint">${def ? esc(def.name) + ' runs locally and shows full-screen on the panel.' : 'Pick an app, then set its options below.'}</p>`;
     document.getElementById('gName').oninput = e => { g.name = e.target.value; renderGrids(); markDirty(); };
     document.getElementById('gApp').onchange = e => { setApp(g, e.target.value); render(); markDirty(); };
+    document.getElementById('refreshApps').onclick = async () => { try { appDefs = await ipcRenderer.invoke('getApps'); } catch (e) {} render(); };
     document.getElementById('gDelete').onclick = deleteCurrentPage;
     wireRotRow(g);
     renderAppOpts(g, def);
