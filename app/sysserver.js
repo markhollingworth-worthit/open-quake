@@ -14,24 +14,26 @@
  *   GET /apptiles    -> the active app page's embedded grid (resolved icons)
  *   GET /media/<cmd> -> transport (play/pause/next/prev/stop) via onMedia
  *   GET /launch?i=N  -> launch the active app grid's tile N via onLaunch (runAction)
+ *   GET /app-proxy   -> generic active drop-in app network proxy, gated by app.json
  */
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const metrics = require('./sysmetrics');
 const nowplaying = require('./nowplaying');
-const QnapClient = require('./qnapClient');
 
 const APPS_DIR = path.join(__dirname, '..', 'apps').replace('app.asar', 'app.asar.unpacked');
 const FALLBACK = '<!doctype html><meta charset="utf-8">'
   + '<body style="margin:0;background:#05080d;color:#9fb3c8;font:20px Segoe UI">page asset missing.</body>';
 const MEDIA_CMDS = { playpause: 1, next: 1, prev: 1, stop: 1 };
 
-let server = null, onMedia = null, onLaunch = null, getMusicTiles = null, getAppTiles = null, getQnapOptions = null;
-let sysHtml = FALLBACK, musicHtml = FALLBACK, chatHtml = FALLBACK, qnapHtml = FALLBACK;
-let chatJs = '', chatCss = '', qnapJs = '', qnapCss = '';
-let qnapClient = null, qnapClientKey = '', qnapLastGood = null;
+let server = null, onMedia = null, onLaunch = null, getMusicTiles = null, getAppTiles = null, getActiveApp = null;
+let sysHtml = FALLBACK, musicHtml = FALLBACK, chatHtml = FALLBACK;
+let chatJs = '', chatCss = '';
 let servedAppDirs = new Map();
+let proxyCookies = new Map();
+let appServerModules = new Map();
 
 function html(res, body) { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(body); }
 function json(res, obj) { res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); }
@@ -80,63 +82,160 @@ function serveDropInApp(reqUrl, res) {
     res.writeHead(404); res.end(); return true;
   }
 }
-function qnapConfigFromOptions(opts) {
-  opts = opts || {};
-  const refreshSeconds = Math.max(5, Math.min(300, parseInt(opts.refreshSeconds, 10) || 15));
-  return {
-    qnap: {
-      host: String(opts.host || '').replace(/\/+$/, ''),
-      username: String(opts.username || ''),
-      password: String(opts.password || ''),
-      verifySsl: !!opts.verifySsl,
-    },
-    dashboard: { refreshSeconds },
-  };
+function optionValue(options, key) {
+  return options && Object.prototype.hasOwnProperty.call(options, key) ? options[key] : null;
 }
-function activeQnapClient() {
-  const cfg = qnapConfigFromOptions(getQnapOptions ? getQnapOptions() : {});
-  const key = JSON.stringify(cfg.qnap);
-  if (!qnapClient || key !== qnapClientKey) {
-    qnapClient = new QnapClient(cfg);
-    qnapClientKey = key;
-    qnapLastGood = null;
-  } else {
-    qnapClient.config.dashboard = cfg.dashboard;
+function boolValue(value) {
+  return value === true || value === 'true' || value === '1' || value === 1;
+}
+function proxySourceAllowed(target, source, options) {
+  if (!source) return false;
+  if (source.option) {
+    const configured = optionValue(options, source.option);
+    if (!configured) return false;
+    try { return new URL(configured).origin === target.origin; } catch (e) { return false; }
   }
-  return qnapClient;
+  if (source.origin && source.origin === target.origin) return true;
+  if (source.pattern) {
+    try { return new RegExp(source.pattern).test(target.href); } catch (e) { return false; }
+  }
+  return false;
 }
-async function qnapSummary() {
-  const data = await activeQnapClient().getSummary();
-  if (data.ok) qnapLastGood = data;
-  else if (qnapLastGood) data.lastGood = qnapLastGood;
-  return data;
+function proxyAllowed(appDef, active, target, method) {
+  const proxy = appDef && appDef.proxy;
+  if (!proxy || active.app !== appDef.id) return { ok: false, error: 'proxy not allowed for active app' };
+  const methods = (proxy.methods || ['GET']).map(x => String(x).toUpperCase());
+  if (!methods.includes(method)) return { ok: false, error: 'method not allowed' };
+  const allow = Array.isArray(proxy.allow) ? proxy.allow : [];
+  const allowed = allow.some(source => proxySourceAllowed(target, source, active.options || {}));
+  if (!allowed) return { ok: false, error: 'target not allowed' };
+  const verifyOpt = proxy.verifySslOption;
+  const rejectUnauthorized = verifyOpt ? boolValue(optionValue(active.options || {}, verifyOpt)) : true;
+  return { ok: true, rejectUnauthorized };
 }
-async function qnapResources() {
-  return activeQnapClient().getResources();
+function proxyError(res, status, message) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Open-Quake-Proxy': 'error' });
+  res.end(JSON.stringify({ ok: false, error: message }));
 }
-
+function proxyCookieKey(appId, origin) {
+  return appId + ' ' + origin;
+}
+function proxyCookieHeader(appId, origin) {
+  const jar = proxyCookies.get(proxyCookieKey(appId, origin));
+  return jar ? Object.entries(jar).map(([k, v]) => k + '=' + v).join('; ') : '';
+}
+function storeProxyCookies(appId, origin, setCookie) {
+  const rows = Array.isArray(setCookie) ? setCookie : (setCookie ? [setCookie] : []);
+  if (!rows.length) return;
+  const key = proxyCookieKey(appId, origin);
+  const jar = proxyCookies.get(key) || {};
+  rows.forEach(row => {
+    const first = String(row).split(';')[0];
+    const idx = first.indexOf('=');
+    if (idx > 0) jar[first.slice(0, idx).trim()] = first.slice(idx + 1).trim();
+  });
+  proxyCookies.set(key, jar);
+}
+function activeProxyApp() {
+  const active = getActiveApp ? getActiveApp() : null;
+  if (!(active && active.kind === 'app' && active.app)) return null;
+  const appDef = servedAppDirs.get(active.app);
+  if (!appDef) return null;
+  return { active, appDef };
+}
+function loadAppServer(appDef) {
+  if (!(appDef && appDef.server)) return null;
+  if (appServerModules.has(appDef.id)) return appServerModules.get(appDef.id);
+  const rel = String(appDef.server || '');
+  if (!rel || path.isAbsolute(rel) || rel.split(/[\\/]/).includes('..')) return null;
+  const file = path.resolve(appDef.baseDir, rel);
+  if (!insideDir(appDef.baseDir, file)) return null;
+  try {
+    const mod = require(file);
+    appServerModules.set(appDef.id, mod);
+    return mod;
+  } catch (e) {
+    console.log('app server module load error:', appDef.id, e.message);
+    appServerModules.set(appDef.id, null);
+    return null;
+  }
+}
+async function serveAppApi(fullUrl, res) {
+  const ctx = activeProxyApp();
+  if (!ctx) return proxyError(res, 403, 'active app is not server-enabled');
+  const mod = loadAppServer(ctx.appDef);
+  if (!(mod && typeof mod.handle === 'function')) return proxyError(res, 404, 'active app has no server handler');
+  const action = decodeURIComponent(fullUrl.split('?')[0].slice('/app-api/'.length) || '');
+  const query = Object.fromEntries(new URL('http://127.0.0.1' + fullUrl).searchParams.entries());
+  try {
+    return json(res, await mod.handle(action, { options: ctx.active.options || {}, query }));
+  } catch (e) {
+    return proxyError(res, 500, e.message);
+  }
+}
+function serveAppProxyConfig(res) {
+  const ctx = activeProxyApp();
+  if (!ctx || !ctx.appDef.proxy) return proxyError(res, 403, 'active app is not proxy-enabled');
+  return json(res, { ok: true, app: ctx.active.app, options: ctx.active.options || {} });
+}
+async function serveAppProxy(fullUrl, req, res) {
+  const ctx = activeProxyApp();
+  if (!ctx) return proxyError(res, 403, 'active app is not proxy-enabled');
+  const { active, appDef } = ctx;
+  const params = new URL('http://127.0.0.1' + fullUrl).searchParams;
+  const targetRaw = params.get('url');
+  if (!targetRaw) return proxyError(res, 400, 'missing url');
+  let target;
+  try { target = new URL(targetRaw); } catch (e) { return proxyError(res, 400, 'invalid url'); }
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') return proxyError(res, 400, 'unsupported protocol');
+  const method = (params.get('method') || req.method || 'GET').toUpperCase();
+  const gate = proxyAllowed(appDef, active, target, method);
+  if (!gate.ok) return proxyError(res, 403, gate.error);
+  const lib = target.protocol === 'https:' ? https : http;
+  const cookie = proxyCookieHeader(active.app, target.origin);
+  const headers = {
+    Accept: params.get('accept') || 'application/json, text/xml, */*',
+    Referer: target.origin + '/',
+    'User-Agent': 'open-quake-app-proxy',
+  };
+  if (cookie) headers.Cookie = cookie;
+  const upstream = lib.request(target, {
+    method,
+    timeout: Math.max(1000, Math.min(30000, parseInt(params.get('timeout'), 10) || 8000)),
+    rejectUnauthorized: gate.rejectUnauthorized,
+    headers,
+  }, upstreamRes => {
+    storeProxyCookies(active.app, target.origin, upstreamRes.headers['set-cookie']);
+    const chunks = [];
+    upstreamRes.on('data', chunk => chunks.push(chunk));
+    upstreamRes.on('end', () => {
+      res.writeHead(upstreamRes.statusCode || 502, {
+        'Content-Type': String(upstreamRes.headers['content-type'] || 'application/octet-stream'),
+        'Cache-Control': 'no-store',
+        'X-Open-Quake-Proxy': 'upstream',
+      });
+      res.end(Buffer.concat(chunks));
+    });
+  });
+  upstream.on('timeout', () => upstream.destroy(new Error('proxy request timed out')));
+  upstream.on('error', e => proxyError(res, 502, e.message));
+  upstream.end();
+}
 async function handler(req, res) {
   if (req.method !== 'GET') { res.writeHead(405); res.end(); return; }
   const full = req.url || '/';
   const url = full.split('?')[0];
+  if (url.indexOf('/app-api/') === 0) return serveAppApi(full, res);
+  if (url === '/app-proxy/config') return serveAppProxyConfig(res);
+  if (url === '/app-proxy') return serveAppProxy(full, req, res);
   if (url === '/' || url === '/index.html') return html(res, sysHtml);
   if (url === '/music') return html(res, musicHtml);
   if (url === '/chat') return html(res, chatHtml);
-  if (url === '/qnap') return html(res, qnapHtml);
   if (url === '/ChatWidget.js') return asset(res, chatJs, 'application/javascript; charset=utf-8');
   if (url === '/owui-widget.css') return asset(res, chatCss, 'text/css; charset=utf-8');
-  if (url === '/qnap/qnapview.js') return asset(res, qnapJs, 'application/javascript; charset=utf-8');
-  if (url === '/qnap/qnapview.css') return asset(res, qnapCss, 'text/css; charset=utf-8');
   if (serveDropInApp(url, res)) return;
   if (url === '/metrics') return json(res, metrics.getSnapshot());
   if (url === '/nowplaying') return json(res, nowplaying.getSnapshot());
-  if (url === '/api/qnap/summary' || url === '/api/qnap/status' || url === '/api/qnap/system-health') return json(res, await qnapSummary());
-  if (url === '/api/qnap/resources') return json(res, await qnapResources());
-  if (url === '/api/qnap/storage') { const s = await qnapSummary(); return json(res, s.storage); }
-  if (url === '/api/qnap/shares') { const s = await qnapSummary(); return json(res, s.shares); }
-  if (url === '/api/qnap/recent-files') { const s = await qnapSummary(); return json(res, s.recentFiles); }
-  if (url === '/api/qnap/network') { const s = await qnapSummary(); return json(res, s.network); }
-  if (url === '/api/qnap/services') { const s = await qnapSummary(); return json(res, s.services); }
   if (url === '/musictiles') {
     let t = { cols: 2, rows: 2, tiles: [] };
     if (getMusicTiles) { try { t = await getMusicTiles(); } catch (e) {} }
@@ -169,21 +268,20 @@ function start(opts) {
   onLaunch = opts.onLaunch || null;
   getMusicTiles = opts.getMusicTiles || null;
   getAppTiles = opts.getAppTiles || null;
-  getQnapOptions = opts.getQnapOptions || null;
+  getActiveApp = opts.getActiveApp || null;
   servedAppDirs = new Map();
+  proxyCookies = new Map();
+  appServerModules = new Map();
   (opts.servedApps || []).forEach(a => {
-    if (a && a.id && a.baseDir) servedAppDirs.set(a.id, { baseDir: a.baseDir, entry: a.entry || a.file || 'index.html' });
+    if (a && a.id && a.baseDir) servedAppDirs.set(a.id, { id: a.id, baseDir: a.baseDir, entry: a.entry || a.file || 'index.html', proxy: a.proxy || null, server: a.server || null });
   });
   return new Promise((resolve, reject) => {
     if (server) return resolve(server.address().port);
     try { sysHtml = fs.readFileSync(path.join(__dirname, 'sysview.html'), 'utf8'); } catch (e) {}
     try { musicHtml = fs.readFileSync(path.join(__dirname, 'musicview.html'), 'utf8'); } catch (e) {}
     try { chatHtml = fs.readFileSync(path.join(__dirname, 'chatview.html'), 'utf8'); } catch (e) {}
-    try { qnapHtml = fs.readFileSync(path.join(__dirname, 'qnapview.html'), 'utf8'); } catch (e) {}
     try { chatJs = fs.readFileSync(path.join(__dirname, 'ChatWidget.js'), 'utf8'); } catch (e) {}
     try { chatCss = fs.readFileSync(path.join(__dirname, 'owui-widget.css'), 'utf8'); } catch (e) {}
-    try { qnapJs = fs.readFileSync(path.join(__dirname, 'qnapview.js'), 'utf8'); } catch (e) {}
-    try { qnapCss = fs.readFileSync(path.join(__dirname, 'qnapview.css'), 'utf8'); } catch (e) {}
     // NB: the pollers are NOT started here. They're gated by which panel page is shown — main.js
     // calls setActivePage() on every page switch so each poller runs only while its page is on screen.
     server = http.createServer((req, res) => { handler(req, res).catch(() => { try { res.writeHead(500); res.end(); } catch (e) {} }); });

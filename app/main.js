@@ -74,41 +74,6 @@ function ensureSystemViewPage(port) {
   config.sysviewInjected = true;
   saveConfig();
 }
-// QNAP is an optional companion service at a stable localhost URL. Inject a dashboard page so existing
-// installs can select it without hand-entering the URL; deleting it remains sticky.
-function ensureQnapPage() {
-  if (!config.grids) config.grids = [];
-  const existing = config.grids.find(g => g.id === 'qnap');
-  if (existing) {
-    if (existing.kind !== 'app' || existing.app !== 'qnap') {
-      existing.kind = 'app';
-      existing.app = 'qnap';
-      existing.name = existing.name || 'QNAP NAS';
-      existing.options = Object.assign({
-        host: 'https://192.168.0.1:443',
-        username: '',
-        password: '',
-        verifySsl: false,
-        refreshSeconds: '15',
-        debugErrors: false,
-      }, existing.options || {});
-      delete existing.url; delete existing.auth;
-      saveConfig();
-    }
-    return;
-  }
-  if (config.qnapInjected) return;
-  config.grids.push({
-    id: 'qnap',
-    name: 'QNAP NAS',
-    kind: 'app',
-    app: 'qnap',
-    options: { host: 'https://192.168.0.1:443', username: '', password: '', verifySsl: false, refreshSeconds: '15', debugErrors: false },
-    rotate: false,
-  });
-  config.qnapInjected = true;
-  saveConfig();
-}
 // The Music controller is a built-in APP page (kind:'app', app:'music') that embeds a programmable
 // 2x2 tile grid — edited in the editor exactly like Default/Media/Dev, its tiles launched via runAction.
 // Ensure one exists on first run; respect deletion thereafter (musicInjected gate).
@@ -182,9 +147,10 @@ async function getMusicTiles() {
   if (!(g && g.kind === 'app' && g.app === 'music')) return { cols: 2, rows: 2, tiles: [] };
   return getActiveAppTiles();
 }
-function getQnapOptions() {
+function getActiveApp() {
   const g = activeGrid();
-  return (g && g.kind === 'app' && g.app === 'qnap') ? (g.options || {}) : {};
+  if (!(g && g.kind === 'app' && g.app)) return null;
+  return { id: g.id, kind: g.kind, app: g.app, options: Object.assign({}, g.options || {}) };
 }
 function hostMatches(a, b) { try { return new URL(a).host === new URL(b).host; } catch (e) { return false; } }
 
@@ -778,14 +744,14 @@ app.on('second-instance', () => {
 });
 
 app.whenReady().then(async () => {
-  try { powerSaveBlocker.start('prevent-display-sleep'); } catch (e) {}
+  // try { powerSaveBlocker.start('prevent-display-sleep'); } catch (e) {}
   createTray();
   // SystemView: live local metrics server on 127.0.0.1 (OS-assigned port) + ensure the dashboard page.
   // Lazy-required so a metrics/load failure can never crash the rest of the app.
   try {
     sysserver = require('./sysserver');
-    serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onAppGridLaunch, getMusicTiles, getAppTiles: getActiveAppTiles, getQnapOptions, servedApps: loadApps().filter(a => a.served) });
-    ensureSystemViewPage(serverPort); ensureMusicPage(); ensureQnapPage();
+    serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onAppGridLaunch, getMusicTiles, getAppTiles: getActiveAppTiles, getActiveApp, servedApps: loadApps().filter(a => a.served) });
+    ensureSystemViewPage(serverPort); ensureMusicPage();
     console.log('local panel services on http://127.0.0.1:' + serverPort);
   } catch (e) { console.log('local panel services failed to start:', e.message); }
   sweepIconCache();   // clean up orphaned URL-icon cache files left by prior sessions
