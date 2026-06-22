@@ -517,6 +517,9 @@
       <div class="row" style="margin-top:10px"><label style="width:auto">Links</label>
         <label class="iconopt" style="width:auto; white-space:nowrap"><input type="checkbox" id="gExt" ${g.linksExternal ? 'checked' : ''}> Open clicked links in my PC browser</label></div>
       <p class="hint">When on, tapping a link inside this page (e.g. a helpdesk ticket) opens it in your PC's default browser instead of on the panel — the page itself stays up on the device.</p>
+      <div class="row" style="margin-top:10px"><label style="width:auto">Identity</label>
+        <label class="iconopt" style="width:auto; white-space:nowrap"><input type="checkbox" id="gUA" ${g.desktopUA ? 'checked' : ''}> Use a desktop browser identity</label></div>
+      <p class="hint">Makes this page look like desktop Chrome instead of an embedded app. Turn on for sites that won't load or let you sign in inside the panel (e.g. claude.ai, chatgpt.com). The panel keeps its own login, separate from your PC browser — sign in once here and it sticks.</p>
       ${rotRowHtml(g)}
       <div class="row" style="margin-top:10px"><button class="danger" id="gDelete">Delete page</button></div>
       <p class="hint" id="authHint"></p>
@@ -526,6 +529,7 @@
     document.getElementById('gAuth').onchange = e => { setAuthType(g, e.target.value); renderAuthFields(g); markDirty(); };
     document.getElementById('gDelete').onclick = deleteCurrentPage;
     document.getElementById('gExt').onchange = e => { g.linksExternal = e.target.checked; markDirty(); };
+    document.getElementById('gUA').onchange = e => { g.desktopUA = e.target.checked; markDirty(); };
     wireRotRow(g);
     renderAuthFields(g);
   }
@@ -758,12 +762,14 @@
         <button id="tabMon" class="${tab === 'monitor' ? 'primary' : ''}">Monitor</button>
       </div>
       ${tab === 'software' ? swHtml : tab === 'hardware' ? hwHtml : monHtml}
-      <div class="row" style="margin-top:22px"><button id="sBack">← Back to pages</button></div>`;
+      <div class="row" style="margin-top:22px"><button id="sBack">← Back to pages</button></div>
+      <p class="hint" id="appVer" style="margin-top:20px; text-align:center; opacity:.55">open-quake</p>`;
 
     document.getElementById('tabSw').onclick = () => { settingsTab = 'software'; renderSettings(); };
     document.getElementById('tabHw').onclick = () => { settingsTab = 'hardware'; renderSettings(); };
     document.getElementById('tabMon').onclick = () => { settingsTab = 'monitor'; renderSettings(); };
     document.getElementById('sBack').onclick = () => { view = 'pages'; render(); };
+    ipcRenderer.invoke('getVersion').then(v => { const e = document.getElementById('appVer'); if (e && v) e.textContent = 'open-quake v' + v; }).catch(() => {});
     const setS = (k, v) => { if (!config.settings) config.settings = {}; config.settings[k] = v; markDirty(); };
 
     if (tab === 'software') {

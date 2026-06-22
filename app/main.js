@@ -8,7 +8,7 @@ const { exec } = require('child_process');
 const { pathToFileURL } = require('url');
 const HID = require('node-hid');
 const Aris68Connector = require(path.join(__dirname, '..', 'src', 'Aris68Connector'));
-let robot = null; try { robot = require('robotjs'); } catch (e) { console.log('robotjs unavailable (knob-volume off):', e.message); }
+let robot = null; try { robot = require('@jitsi/robotjs'); } catch (e) { console.log('robotjs unavailable (knob-volume off):', e.message); }
 
 const USER_DIR = app.getPath('userData');
 const CONFIG_PATH = path.join(USER_DIR, 'config.json');                  // writable — works inside a packaged app too
@@ -617,7 +617,7 @@ function monitorKnob(k) {
   const m = monitorCfg();
   try {
     if (k.type === 'rotate') {
-      if (m.knobTurn === 'scroll') robot.scrollMouse(0, k.dir > 0 ? -120 : 120);   // 120 = one wheel notch per detent (needs the patched robotjs — see patches/)
+      if (m.knobTurn === 'scroll') robot.scrollMouse(0, k.dir > 0 ? -120 : 120);   // 120 = one wheel notch per detent (@jitsi/robotjs fixes the Windows scroll natively)
       else robot.keyTap(k.dir > 0 ? 'audio_vol_up' : 'audio_vol_down');
     } else if (k.type === 'press' && k.index === 1) {                          // single-tap action
       if (m.knobTap === 'leftclick') robot.mouseClick('left');
@@ -656,6 +656,22 @@ function openConfigWindow() {
     ]);
     menu.popup({ window: configWin });
   });
+}
+
+// About dialog — version + runtime, with a link out to the repo.
+function showAbout() {
+  const parent = (configWin && !configWin.isDestroyed()) ? configWin : null;
+  dialog.showMessageBox(parent, {
+    type: 'info',
+    title: 'About open-quake',
+    message: 'open-quake v' + app.getVersion(),
+    detail: 'Open driver + touchscreen launcher for the DK-QUAKE / ARIS-68.\n\n'
+      + 'Electron ' + process.versions.electron + '  ·  Chromium ' + process.versions.chrome + '\n\n'
+      + 'Independent community project — not affiliated with or endorsed by DECOKEE.\n'
+      + 'github.com/TeeJS/open-quake',
+    buttons: ['Close', 'Open GitHub'],
+    defaultId: 0, cancelId: 0, noLink: true,
+  }).then(r => { if (r.response === 1) { try { shell.openExternal('https://github.com/TeeJS/open-quake'); } catch (e) {} } }).catch(() => {});
 }
 
 // ---- device settings (knob RGB ring, mic) ----
@@ -722,7 +738,7 @@ function applyRotationSettings(wasEnabled) {
 function trayMenu() {
   const ringOn = lighting().effect !== 0;
   const items = [
-    { label: 'open-quake', enabled: false },
+    { label: 'open-quake v' + app.getVersion(), enabled: false },
     { type: 'separator' },
     { label: 'Open editor', click: () => openConfigWindow() },
     { label: micState ? 'Mic: on — click to disable' : 'Mic: off — click to enable', click: () => toggleMic() },
@@ -733,6 +749,7 @@ function trayMenu() {
     { label: monitorMode ? 'Monitor mode: on — click to return to panel' : 'Switch to monitor mode (use device as a normal monitor)', click: () => toggleMonitorMode() },
     { label: 'Re-place panel on device', enabled: !monitorMode, click: () => { try { dev.screenOn(); } catch (e) {} placePanel(); } },
     { type: 'separator' },
+    { label: 'About open-quake', click: () => showAbout() },
     { label: 'Quit', click: () => { try { dev.stop(); } catch (e) {} app.quit(); } },
   );
   return Menu.buildFromTemplate(items);
@@ -797,6 +814,18 @@ app.whenReady().then(async () => {
     }
   });
 
+  // window.open / target=_blank inside a dashboard webview. The old <webview> 'new-window' event was
+  // removed after Electron 22; setWindowOpenHandler is the modern path. Never spawn a popup window on the
+  // panel — open externally on the PC when the page opted in (linksExternal), otherwise just deny.
+  app.on('web-contents-created', (e, contents) => {
+    if (contents.getType() !== 'webview') return;
+    contents.setWindowOpenHandler(({ url }) => {
+      const g = activeGrid();
+      if (g && g.kind === 'web' && g.linksExternal && /^https?:/i.test(url)) { try { shell.openExternal(url); } catch (er) {} }
+      return { action: 'deny' };
+    });
+  });
+
   ipcMain.on('launch', (e, a) => runAction(a));
   ipcMain.on('volume', (e, v) => { if (robot) { try { if (v === 'mute') robot.keyTap('audio_mute'); else robot.keyTap(v > 0 ? 'audio_vol_up' : 'audio_vol_down'); } catch (er) {} } });
   ipcMain.on('switchGrid', (e, id) => { gotoGrid(id, true); if (rotateRunning) scheduleRotation(); });   // a manual pick resets the rotation timer
@@ -806,6 +835,7 @@ app.whenReady().then(async () => {
   ipcMain.on('openExternal', (e, url) => { try { if (typeof url === 'string' && /^https?:/i.test(url)) shell.openExternal(url); } catch (er) {} });
   ipcMain.handle('getConfig', () => config);
   ipcMain.handle('getApps', () => appsForEditor());
+  ipcMain.handle('getVersion', () => app.getVersion());
   ipcMain.on('saveConfigFromEditor', (e, newCfg) => {
     const active = config.activeGridId;                          // the knob owns the live page — editor edits never change it
     const wasRot = rotationCfg().enabled;                        // detect a fresh off->on to auto-start (else keep the runtime pause)

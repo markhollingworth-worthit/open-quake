@@ -1,6 +1,6 @@
 {
   "name": "open-quake",
-  "version": "0.2.5-beta.1",
+  "version": "0.2.5",
   "private": true,
   "description": "Open driver + multi-grid touchscreen launcher for the DK-QUAKE / ARIS-68 touchscreen-and-knob macro device.",
   "main": "app/main.js",
@@ -9,9 +9,8 @@
     "node": ">=18 <25"
   },
   "scripts": {
-    "postinstall": "patch-package",
     "start": "node build-smtc.js && electron .",
-    "rebuild": "electron-rebuild -v 23.0.0 -f",
+    "rebuild": "electron-rebuild -v 42.4.1 -f --only node-hid",
     "build:smtc": "node build-smtc.js",
     "dist": "node build-smtc.js && electron-builder --win"
   },
@@ -26,16 +25,14 @@
     "electron"
   ],
   "dependencies": {
+    "@jitsi/robotjs": "^0.6.22",
     "node-hid": "^3.3.0",
-    "robotjs": "^0.6.0",
     "systeminformation": "^5.31.7"
   },
   "devDependencies": {
-    "@electron/rebuild": "^3.6.0",
-    "electron": "^23.0.0",
-    "electron-builder": "^24.13.3",
-    "patch-package": "^8.0.1",
-    "postinstall-postinstall": "^2.1.0"
+    "@electron/rebuild": "^4.0.1",
+    "electron": "^42.4.1",
+    "electron-builder": "^26.0.12"
   },
   "build": {
     "appId": "com.teejs.openquake",
@@ -67,7 +64,9 @@
         "nsis"
       ],
       "icon": "app/icon.png",
-      "sign": "./sign.js"
+      "signtoolOptions": {
+        "sign": "./sign.js"
+      }
     },
     "portable": {
       "artifactName": "open-quake-${version}-portable.${ext}"
