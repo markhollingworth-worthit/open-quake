@@ -2406,19 +2406,70 @@ X.lex;
 function Zs(e, t) {
   e.key === "Enter" && !e.shiftKey && (e.preventDefault(), t());
 }
+const OQ_MARKDOWN_ALLOWED_TAGS = new Set([
+  "a", "blockquote", "br", "code", "del", "em", "h1", "h2", "h3", "h4", "h5", "h6",
+  "hr", "img", "li", "ol", "p", "pre", "s", "span", "strong", "table", "tbody", "td",
+  "th", "thead", "tr", "ul"
+]), OQ_MARKDOWN_ALLOWED_ATTRS = {
+  a: new Set(["href", "title"]),
+  img: new Set(["src", "alt", "title"]),
+  code: new Set(["class"]),
+  td: new Set(["align"]),
+  th: new Set(["align"])
+}, OQ_MARKDOWN_URL_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
+function isSafeMarkdownUrl(e, t) {
+  const r = String(e || "").trim();
+  if (!r || r.replace(/[\u0000-\u001F\u007F\s]+/g, "").toLowerCase().startsWith("javascript:")) return !1;
+  if (t === "src" && /^data:image\/(?:png|gif|jpe?g|webp);base64,[a-z0-9+/]+=*$/i.test(r)) return !0;
+  try {
+    return OQ_MARKDOWN_URL_PROTOCOLS.has(new URL(r, window.location.href).protocol);
+  } catch {
+    return !1;
+  }
+}
+function sanitizeRenderedMarkdown(e) {
+  const t = document.createElement("template");
+  t.innerHTML = String(e || "");
+  const r = document.createTreeWalker(t.content, NodeFilter.SHOW_ELEMENT), n = [];
+  for (; r.nextNode(); ) {
+    const s = r.currentNode, l = s.localName;
+    if (!OQ_MARKDOWN_ALLOWED_TAGS.has(l)) {
+      n.push(s);
+      continue;
+    }
+    for (const u of Array.from(s.attributes)) {
+      const i = u.name.toLowerCase(), a = OQ_MARKDOWN_ALLOWED_ATTRS[l] || new Set();
+      if (i.startsWith("on") || !a.has(i)) {
+        s.removeAttribute(u.name);
+        continue;
+      }
+      if ((i === "href" || i === "src") && !isSafeMarkdownUrl(u.value, i)) {
+        s.removeAttribute(u.name);
+        continue;
+      }
+      if (l === "code" && i === "class" && !/^language-[A-Za-z0-9_-]+$/.test(u.value)) s.removeAttribute(u.name);
+      if ((l === "td" || l === "th") && i === "align" && !/^(left|center|right)$/i.test(u.value)) s.removeAttribute(u.name);
+    }
+    if (l === "a" && s.hasAttribute("href")) {
+      s.setAttribute("target", "_blank");
+      s.setAttribute("rel", "noopener noreferrer");
+    }
+  }
+  for (const s of n) s.replaceWith(document.createTextNode(s.textContent || ""));
+  return t.innerHTML;
+}
 var Fs = /* @__PURE__ */ Lr('<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="svelte-1665k1s"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" class="svelte-1665k1s"></path><circle cx="12" cy="7" r="4" class="svelte-1665k1s"></circle></svg>'), Hs = /* @__PURE__ */ Lr('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="svelte-1665k1s"><path d="M12 2L2 7L12 12L22 7L12 2Z" class="svelte-1665k1s"></path><path d="M2 17L12 22L22 17" class="svelte-1665k1s"></path><path d="M2 12L12 17L22 12" class="svelte-1665k1s"></path></svg>'), js = /* @__PURE__ */ Tt('<div><div><!></div> <div class="message markdown-content svelte-1665k1s"><!></div></div>'), Qs = /* @__PURE__ */ Tt('<div class="message-wrapper assistant svelte-1665k1s"><div class="avatar assistant svelte-1665k1s"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="svelte-1665k1s"><path d="M12 2L2 7L12 12L22 7L12 2Z" class="svelte-1665k1s"></path><path d="M2 17L12 22L22 17" class="svelte-1665k1s"></path><path d="M2 12L12 17L22 12" class="svelte-1665k1s"></path></svg></div> <div class="loading-dots svelte-1665k1s"><div class="loading-dot svelte-1665k1s"></div> <div class="loading-dot svelte-1665k1s"></div> <div class="loading-dot svelte-1665k1s"></div></div></div>'), Us = /* @__PURE__ */ Tt('<div class="wrapper svelte-1665k1s"><div class="header svelte-1665k1s"><div class="header-icon svelte-1665k1s"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="svelte-1665k1s"><path d="M12 2L2 7L12 12L22 7L12 2Z" class="svelte-1665k1s"></path><path d="M2 17L12 22L22 17" class="svelte-1665k1s"></path><path d="M2 12L12 17L22 12" class="svelte-1665k1s"></path></svg></div> <div class="header-title svelte-1665k1s"> </div></div> <div class="messages svelte-1665k1s"><!> <!></div> <div class="input-container svelte-1665k1s"><form class="svelte-1665k1s"><div class="input-wrapper svelte-1665k1s"><textarea placeholder="Send a message..." class="svelte-1665k1s"></textarea> <button type="submit" aria-label="Send message" class="svelte-1665k1s"><svg class="send-icon svelte-1665k1s" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" class="svelte-1665k1s"></path></svg></button></div></form></div></div>');
 function Vs(e, t) {
   rr(t, !0);
   let r = /* @__PURE__ */ D(ae([])), n = /* @__PURE__ */ D(""), s = /* @__PURE__ */ D(!1), l, u = "", i = /* @__PURE__ */ D("gpt-4o-mini"), a = "/api/chat/completions";
   k.setOptions({ breaks: !0, gfm: !0 });
   function o(x) {
-    return k.parse(x);
+    return sanitizeRenderedMarkdown(k.parse(x));
   }
   Gn(() => {
-    console.log("ChatWidget onMount triggered. Attempting to read query parameters.");
     try {
-      const x = new URLSearchParams(window.location.search), T = x.get("api_key"), V = x.get("model"), K = x.get("endpoint");
-      T !== null && (u = T), V !== null && E(i, V, !0), K !== null && (a = K), console.log("Query parameters processed:", { apiKey: u, model: y(i), endpoint: a });
+      const x = window.openQuakeChatRuntimeConfig || {}, T = x.apiKey, V = x.model, K = x.endpoint;
+      T !== void 0 && (u = T), V !== void 0 && E(i, V, !0), K !== void 0 && (a = K);
     } catch (x) {
       console.error("Error processing query parameters in onMount:", x);
     }
