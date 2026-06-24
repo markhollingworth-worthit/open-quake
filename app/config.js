@@ -134,6 +134,10 @@
   function devShown(id) { return (((config.settings || {}).shownDevApps) || []).includes(id); }
   function devEnabled() { return !!((config.settings || {}).devApps); }
   function appVisible(a) { return a && a.dev ? devShown(a.id) : !appHidden(a.id); }
+  async function refreshApps() {
+    try { appDefs = await configApi.getApps(); } catch (e) { appDefs = []; }
+    render();
+  }
 
   async function ensureAppIcon(value) {
     if (!value || Object.prototype.hasOwnProperty.call(appIconCache, value)) return;
@@ -554,10 +558,10 @@
     const el = document.getElementById('gridmeta');
     el.innerHTML = `
       <div class="row"><label>Name</label><input id="gName" value="${esc(g.name)}"></div>
-      <div class="row"><label>App</label><select id="gApp">
+      <div class="row"><label>App</label><select id="gApp" style="flex:1;width:auto">
         <option value="">— choose an app —</option>
         ${appDefs.filter(a => a.id === g.app || appVisible(a)).map(a => `<option value="${esc(a.id)}" ${a.id === g.app ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}
-      </select></div>
+      </select><button id="refreshApps" type="button" title="Reload app manifests">Refresh</button></div>
       <div id="appOpts"></div>
       ${rotRowHtml(g)}
       ${shortcutRowHtml(g)}
@@ -566,6 +570,7 @@
       <p class="hint">${def ? esc(def.name) + ' runs locally and shows full-screen on the panel.' : 'Pick an app, then set its options below.'}</p>`;
     document.getElementById('gName').oninput = e => { g.name = e.target.value; renderGrids(); markDirty(); };
     document.getElementById('gApp').onchange = e => { setApp(g, e.target.value); render(); markDirty(); };
+    document.getElementById('refreshApps').onclick = refreshApps;
     document.getElementById('gDelete').onclick = deleteCurrentPage;
     wireRotRow(g); wireShortcutRow(g); wireAdvRow(g);
     renderAppOpts(g, def);

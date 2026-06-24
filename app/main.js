@@ -194,11 +194,82 @@ function handleDashboardPermissionRequest(wc, permission, cb, details) {
   return cb(false);
 }
 
-// Bundled local apps (apps/apps.json) — name, file, and an options schema the editor renders.
-function loadApps() {
-  try { return JSON.parse(fs.readFileSync(path.join(APPS_DIR, 'apps.json'), 'utf8')); }
-  catch (e) { console.log('apps manifest load error:', e.message); return []; }
+const SAFE_APP_ID = /^[a-z0-9][a-z0-9_-]*$/;
+const appManifestWarnings = new Set();
+function warnAppManifest(key, message) {
+  if (appManifestWarnings.has(key)) return;
+  appManifestWarnings.add(key);
+  console.log(message);
 }
+function safeAppEntry(value) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const rel = value.trim().replace(/\\/g, '/');
+  if (rel.includes('..') || rel.startsWith('/') || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(rel) || path.isAbsolute(rel)) return null;
+  return rel;
+}
+function appEntryUrlPath(entry) { return String(entry || '').split('/').map(encodeURIComponent).join('/'); }
+function readLegacyApps() {
+  try {
+    const apps = JSON.parse(fs.readFileSync(path.join(APPS_DIR, 'apps.json'), 'utf8'));
+    return Array.isArray(apps) ? apps : [];
+  } catch (e) { console.log('apps manifest load error:', e.message); return []; }
+}
+function readFolderAppManifest(appDir) {
+  for (const name of ['app.json', 'manifest.json']) {
+    const manifestPath = path.join(appDir, name);
+    try {
+      if (fs.existsSync(manifestPath)) return JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    } catch (e) {
+      warnAppManifest('parse:' + manifestPath, 'app manifest load error: ' + manifestPath + ' - ' + e.message);
+      return null;
+    }
+  }
+  return null;
+}
+function appCatalog() {
+  const apps = readLegacyApps();
+  const ids = new Set(apps.map(a => a && a.id).filter(Boolean));
+  const servedApps = {};
+  let entries = [];
+  try { entries = fs.readdirSync(APPS_DIR, { withFileTypes: true }); }
+  catch (e) { return { apps, servedApps }; }
+  entries.filter(d => d.isDirectory()).forEach(d => {
+    const appDir = path.join(APPS_DIR, d.name);
+    const manifest = readFolderAppManifest(appDir);
+    if (!manifest) return;
+    const id = typeof manifest.id === 'string' ? manifest.id.trim() : '';
+    if (!SAFE_APP_ID.test(id)) {
+      warnAppManifest('id:' + appDir, 'skipping app folder with invalid id: ' + appDir);
+      return;
+    }
+    const entry = safeAppEntry(manifest.entry || manifest.file);
+    if (!entry) {
+      warnAppManifest('entry:' + appDir, 'skipping app folder with invalid entry: ' + id);
+      return;
+    }
+    if (ids.has(id)) {
+      warnAppManifest('dup:' + id, 'skipping duplicate app id: ' + id);
+      return;
+    }
+    const def = Object.assign({}, manifest, {
+      id,
+      name: manifest.name || id,
+      file: entry,
+      entry,
+      served: !!manifest.served,
+      options: Array.isArray(manifest.options) ? manifest.options : [],
+      _folder: true,
+      _dir: appDir,
+    });
+    apps.push(def);
+    ids.add(id);
+    if (def.served) servedApps[id] = { root: appDir, proxy: manifest.proxy || null };
+  });
+  return { apps, servedApps };
+}
+// Bundled local apps (apps/apps.json) plus drop-in app folders under apps/<id>/.
+function loadApps() { return appCatalog().apps; }
+function discoveredServedApps() { return appCatalog().servedApps; }
 // Secret-at-rest store: encrypts the secret-typed config fields (dashboard tokens / Basic passwords /
 // custom header values / app secret options) in config.json via Electron safeStorage. The in-memory
 // `config` stays plaintext; encryption happens only at the disk boundary (saveConfig). safeStorage
@@ -226,9 +297,10 @@ function appPageUrl(page) {
   if (def.served) {                                                          // served by the local server (live data, same-origin fetch, grid launch)
     const opts = page.options || {};                                         // non-secret options only; secrets are served by /app-config
     const qs = [appOptionQuery(def, opts, o => o.type !== 'secret'), themeParams(page)].filter(Boolean).join('&');
+    if (def._folder) return 'http://127.0.0.1:' + serverPort + '/apps/' + encodeURIComponent(def.id) + '/' + appEntryUrlPath(def.entry || def.file) + (qs ? '?' + qs : '');
     return 'http://127.0.0.1:' + serverPort + '/' + def.id + (qs ? '?' + qs : '');
   }
-  const file = path.join(APPS_DIR, def.file);
+  const file = def._folder ? path.join(def._dir, def.entry || def.file) : path.join(APPS_DIR, def.file);
   const opts = page.options || {};
   const hash = [appOptionQuery(def, opts, o => o.type !== 'secret'), themeParams(page)].filter(Boolean).join('&');
   return pathToFileURL(file).href + (hash ? '#' + hash : '');
@@ -751,7 +823,7 @@ app.whenReady().then(async () => {
   // Lazy-required so a metrics/load failure can never crash the rest of the app.
   try {
     sysserver = require('./sysserver');
-    serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onMusicLaunch, getMusicTiles, getAppConfig: activeServedAppConfig });
+    serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onMusicLaunch, getMusicTiles, getAppConfig: activeServedAppConfig, onOpenExternal: openExternalUrl, appFolders: discoveredServedApps() });
     ensureSystemViewPage(serverPort); ensureMusicPage();
     const env = loadEnv(); haschedule.configure({ url: env.HA_URL, token: env.HA_TOKEN });   // HA Schedule dev app creds
     console.log('SystemView + Music on http://127.0.0.1:' + serverPort + (env.HA_URL ? ' · HA Schedule -> ' + env.HA_URL : ''));
@@ -808,7 +880,12 @@ app.whenReady().then(async () => {
   });
   ipcMain.on('openExternal', (e, url) => { if (!isFrom(e, panelWin) && !isFrom(e, configWin)) return; openExternalUrl(url); });
   ipcMain.handle('getConfig', (e) => isFrom(e, configWin) ? config : null);
-  ipcMain.handle('getApps', (e) => isFrom(e, configWin) ? loadApps() : []);
+  ipcMain.handle('getApps', (e) => {
+    if (!isFrom(e, configWin)) return [];
+    const catalog = appCatalog();
+    try { if (sysserver && sysserver.setAppFolders) sysserver.setAppFolders(catalog.servedApps); } catch (er) {}
+    return catalog.apps;
+  });
   ipcMain.on('saveConfigFromEditor', (e, newCfg) => {
     if (!isFrom(e, configWin) || !newCfg || typeof newCfg !== 'object' || !Array.isArray(newCfg.grids)) return;
     const active = config.activeGridId;                          // the knob owns the live page — editor edits never change it
