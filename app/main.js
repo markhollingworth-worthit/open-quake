@@ -27,6 +27,8 @@ let micState = false;     // current device mic state (LED follows it)
 let lastRingEffect = LED_DEFAULT.effect; // remembered so the tray on/off toggle can restore the prior effect
 let rotateRunning = false;               // screen-rotation runtime on/off (starts per settings on launch)
 let rotTimer = null;
+let monitorMode = false;                 // monitor mode: panel UI hidden so the device shows the Windows desktop
+let touchDown = false, touchIdle = null; // monitor-mode touch -> OS mouse button state
 let sysserver = null;                    // SystemView/Music local server (lazy-required in whenReady)
 let serverPort = 0;                      // the local server's ephemeral port (for music-page routing)
 let config = loadConfig();
@@ -214,7 +216,8 @@ function gridList() { return config.grids.map(g => ({ id: g.id, name: g.name }))
 // (SystemView metrics / Music now-playing) and idles the rest — no background polling while hidden.
 function syncPollers(g) {
   if (!sysserver) return;
-  const which = (g && g.id === 'sysview') ? 'sysview'
+  const which = monitorMode ? null                                  // panel hidden (monitor mode) -> idle every page poller
+    : (g && g.id === 'sysview') ? 'sysview'
     : (g && g.kind === 'app' && g.app === 'music') ? 'music'
     : null;
   try { sysserver.setActivePage(which); } catch (e) {}
@@ -364,6 +367,7 @@ function runAction(a) {
       case 'system':
         if (a.value === 'lock') lockWorkstation();
         else if (a.value === 'mic') toggleMic();
+        else if (a.value === 'monitor') enterMonitorMode();   // hand the device screen to Windows; return via the tray
         break;
       case 'paste_text': pasteText(a.value); break;
       case 'counter': break;   // counter changes are saved by the panel directly via saveTileValue IPC; no main-process action needed on tap
@@ -397,6 +401,7 @@ function applyPanelDisplayMode(d) {
   else panelWin.setFullScreen(true);
 }
 function placePanel() {
+  if (monitorMode) return;                                          // in monitor mode the panel stays hidden — don't re-show it over the desktop
   const d = deviceDisplay();
   if (!d) { console.log('placePanel: DK-QUAKE display not present'); return; }
   if (!panelWin || panelWin.isDestroyed()) {
@@ -422,6 +427,75 @@ function placePanel() {
       console.log('panel placed at', JSON.stringify(panelWin.getBounds()), 'fullscreen', panelWin.isFullScreen(), 'simpleFullscreen', panelWin.isSimpleFullScreen && panelWin.isSimpleFullScreen());
     });
   } else { applyPanelDisplayMode(d); panelWin.show(); pushToPanel(); }
+}
+
+// ---- monitor mode: use the device as a normal monitor ----
+// Hide the launcher window so the Windows desktop shows on the device; the driver keep-alive keeps the
+// backlight lit. Touch drives the OS cursor and the knob does a configurable action — both via the trusted
+// device input only (mediaKeys / robotjs), never web content. The tray (or a System->monitor tile) toggles it.
+function enterMonitorMode() {
+  if (monitorMode || !panelWin || panelWin.isDestroyed()) return;
+  monitorMode = true;
+  try { if (process.platform === 'darwin') panelWin.setSimpleFullScreen(false); else panelWin.setFullScreen(false); } catch (e) {}
+  panelWin.hide();
+  syncPollers(null);                                                // nothing on the panel is visible -> idle the page pollers
+  try { dev.screenOn(); } catch (e) {}                              // keep the backlight on as the desktop takes over
+  refreshTray();
+  console.log('monitor mode: ON (panel hidden, desktop visible)');
+}
+function exitMonitorMode(reason) {
+  if (!monitorMode) return;
+  monitorMode = false;
+  releaseTouch();                                                   // drop any held mouse button from an in-progress touch
+  if (panelWin && !panelWin.isDestroyed()) {
+    const d = deviceDisplay();
+    if (d) applyPanelDisplayMode(d);
+    panelWin.setAlwaysOnTop(true); panelWin.show(); panelWin.focus();
+    setTimeout(() => { try { panelWin.setAlwaysOnTop(false); } catch (e) {} }, 1500);
+  }
+  syncPollers(activeGrid());                                        // resume the active page's poller
+  refreshTray();
+  console.log('monitor mode: OFF (' + (reason || '') + ')');
+}
+function toggleMonitorMode() { monitorMode ? exitMonitorMode('tray') : enterMonitorMode(); }
+
+// Monitor-mode touch -> OS cursor: tap = left-click, drag = move with the button held, lift = release.
+// Maps the panel's bottom-left-origin coords (x:0..1920, y:0..480) onto the device monitor's screen rect.
+function injectTouch(p) {
+  if (!mediaKeys.available()) return;
+  const d = deviceDisplay(); if (!d) return;
+  const b = d.bounds;
+  const x = Math.round(b.x + Math.max(0, Math.min(1920, p.x)));
+  const y = Math.round(b.y + Math.max(0, Math.min(480, 480 - p.y)));   // device origin is bottom-left -> flip Y for the top-left screen
+  clearTimeout(touchIdle);
+  if (p.action === 1) {
+    mediaKeys.moveMouse(x, y);
+    if (!touchDown) { touchDown = true; mediaKeys.mouseToggle(true, 'left'); }
+    touchIdle = setTimeout(releaseTouch, 140);
+  } else releaseTouch();
+}
+function releaseTouch() { clearTimeout(touchIdle); if (touchDown) { touchDown = false; mediaKeys.mouseToggle(false, 'left'); } }
+
+// Knob behavior in monitor mode (configurable on the editor's Monitor settings tab). Turn -> scroll or
+// volume; single-tap -> Enter / left-click / right-click / mute. Exit is tray-only (knob stays free).
+function monitorCfg() {
+  const m = (config.settings || {}).monitor || {};
+  return {
+    knobTurn: m.knobTurn === 'volume' ? 'volume' : 'scroll',                         // default: scroll
+    knobTap: ['leftclick', 'enter', 'rightclick', 'mute'].includes(m.knobTap) ? m.knobTap : 'enter',   // default: enter
+  };
+}
+function monitorKnob(k) {
+  const m = monitorCfg();
+  if (k.type === 'rotate') {
+    if (m.knobTurn === 'scroll') mediaKeys.scroll(k.dir > 0 ? -120 : 120);           // 120 = one wheel notch per detent
+    else mediaKeys.volume(k.dir > 0 ? 1 : -1);
+  } else if (k.type === 'press' && k.index === 1) {
+    if (m.knobTap === 'leftclick') mediaKeys.click('left');
+    else if (m.knobTap === 'enter') mediaKeys.tapKey('enter');
+    else if (m.knobTap === 'rightclick') mediaKeys.click('right');
+    else mediaKeys.volume('mute');
+  }
 }
 
 function openConfigWindow() {
@@ -544,7 +618,8 @@ function trayMenu() {
   ];
   if (rotationCfg().enabled) items.push({ label: rotateRunning ? 'Auto-rotate: on — click to pause' : 'Auto-rotate: off — click to start', click: () => toggleRotation() });
   items.push(
-    { label: 'Re-place panel on device', click: () => { try { dev.screenOn(); } catch (e) {} placePanel(); } },
+    { label: monitorMode ? 'Monitor mode: on — click to return to panel' : 'Switch to monitor mode (use device as a normal monitor)', click: () => toggleMonitorMode() },
+    { label: 'Re-place panel on device', enabled: !monitorMode, click: () => { try { dev.screenOn(); } catch (e) {} placePanel(); } },
     { type: 'separator' },
     { label: 'Quit', click: () => { try { dev.stop(); } catch (e) {} app.quit(); } },
   );
@@ -689,8 +764,14 @@ app.whenReady().then(async () => {
   else if (ls.launchMode === 'minimized') { openConfigWindow(); if (configWin && !configWin.isDestroyed()) configWin.minimize(); }
   // 'tray' -> stay quiet (tray + panel only)
 
-  dev.on('touch', pts => { if (panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('touch', pts); });
-  dev.on('knob', k => { if (panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('knob', k); }); // panel owns knob logic
+  dev.on('touch', pts => {
+    if (monitorMode) { const p = pts.find(q => q.action === 1) || pts[0]; if (p) injectTouch(p); return; }   // monitor mode: touch drives the Windows cursor
+    if (panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('touch', pts);
+  });
+  dev.on('knob', k => {
+    if (monitorMode) return monitorKnob(k);                                    // monitor mode: knob does the configured action (exit is tray-only)
+    if (panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('knob', k);   // panel owns knob logic
+  });
   dev.on('connect', async i => {
     console.log('connect:', i.iface);
     if (i.iface !== 'control') return;

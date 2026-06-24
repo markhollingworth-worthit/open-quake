@@ -378,7 +378,7 @@
     else el.innerHTML = t.icon ? `<span class="em">${esc(t.icon)}</span>` : `<span class="none">no emoji</span>`;
   }
 
-  function valuePlaceholder(type) { return type === 'url' ? 'https://…' : type === 'app' ? 'chrome  (or full path)' : type === 'cmd' ? 'start ms-settings:' : type === 'system' ? 'lock  |  config  |  mic' : type === 'counter' ? 'Starting value (e.g. 0)' : type === 'paste_text' ? 'Text to paste on tap' : ''; }
+  function valuePlaceholder(type) { return type === 'url' ? 'https://…' : type === 'app' ? 'chrome  (or full path)' : type === 'cmd' ? 'start ms-settings:' : type === 'system' ? 'lock  |  config  |  mic  |  monitor' : type === 'counter' ? 'Starting value (e.g. 0)' : type === 'paste_text' ? 'Text to paste on tap' : ''; }
   function pageSelectHtml(t) {
     const others = (config.grids || []).filter(g => g.id !== curGrid().id);
     if (!others.length) return '<span class="hint">No other pages to link to yet — add one first.</span>';
@@ -389,7 +389,7 @@
     if (type === 'url') return 'Opens in your default browser.';
     if (type === 'page') return 'Tapping (or clicking) this tile switches the panel to the chosen page.';
     if (type === 'cmd') return 'Runs a shell command (advanced; only use commands you fully trust).';
-    if (type === 'system') return 'lock = lock screen · config = open this editor · mic = toggle the device mic.';
+    if (type === 'system') return 'lock = lock screen · config = open this editor · mic = toggle the device mic · monitor = hide the panel and use the device as a normal monitor (return via the tray).';
     if (type === 'counter') return 'Tap the left half of the tile to decrement, the right half to increment. The value persists across sessions.';
     if (type === 'paste_text') return 'Tap this tile to paste the text into whatever window is active on your PC (overwrites your clipboard).';
     return '';
@@ -549,6 +549,8 @@
     const s = appSettings();
     const currentRot = () => { const r = Object.assign({ enabled: false, interval: 30 }, (config.settings || {}).rotation || {}); r.cats = Object.assign({ grids: false, dashboards: false, apps: false }, ((config.settings || {}).rotation || {}).cats || {}); return r; };
     const rot = currentRot();
+    const currentMon = () => Object.assign({ knobTurn: 'scroll', knobTap: 'enter' }, (config.settings || {}).monitor || {});
+    const mon = currentMon();
     // ledState = the device's live lighting (loaded when the page opens); fall back to saved config / defaults.
     const L = Object.assign({}, LED_DEFAULT, (config.settings || {}).lighting || {}, ledState || {});
     const effOpts = LED_EFFECTS.map((n, i) => `<option value="${i}">${esc(n)}</option>`).join('');
@@ -599,17 +601,37 @@
         <input type="checkbox" id="sMic" style="width:auto;flex:none"><span class="hint" style="margin:0 0 0 8px">enable the device mic when open-quake starts</span></div>
       <p class="hint">The mic LED and the mic audio are one hardware switch — the light is on whenever the mic is enabled, off when it isn't. Toggle it any time from the tray menu or a “System → mic” tile.</p>`;
 
+    // Monitor tab — how the knob behaves while the device is used as a normal monitor
+    const monHtml = `
+      <p class="sectitle">Monitor mode</p>
+      <p class="hint">Use the device as a normal monitor: it shows your Windows desktop and touch acts as the mouse. Enter it from the tray menu or a “System → monitor” tile; exit from the tray. These set what the knob does while in monitor mode.</p>
+      <div class="row"><label>Knob turn</label>
+        <select id="sMonTurn" style="width:230px">
+          <option value="scroll">Scroll</option>
+          <option value="volume">Adjust volume</option>
+        </select></div>
+      <div class="row"><label>Knob tap</label>
+        <select id="sMonTap" style="width:230px">
+          <option value="enter">Enter</option>
+          <option value="leftclick">Left-click</option>
+          <option value="rightclick">Right-click</option>
+          <option value="mute">Mute / unmute</option>
+        </select></div>
+      <p class="hint">A single knob press does the “tap” action. Double-press is unbound in monitor mode.</p>`;
+
     el.innerHTML = `
       <p class="sectitle">Settings</p>
       <div class="row" style="gap:6px; margin:0 0 6px">
         <button id="tabSw" class="${tab === 'software' ? 'primary' : ''}">Software</button>
         <button id="tabHw" class="${tab === 'hardware' ? 'primary' : ''}">Hardware</button>
+        <button id="tabMon" class="${tab === 'monitor' ? 'primary' : ''}">Monitor</button>
       </div>
-      ${tab === 'software' ? swHtml : hwHtml}
+      ${tab === 'software' ? swHtml : tab === 'hardware' ? hwHtml : monHtml}
       <div class="row" style="margin-top:22px"><button id="sBack">← Back to pages</button></div>`;
 
     document.getElementById('tabSw').onclick = () => { settingsTab = 'software'; renderSettings(); };
     document.getElementById('tabHw').onclick = () => { settingsTab = 'hardware'; renderSettings(); };
+    document.getElementById('tabMon').onclick = () => { settingsTab = 'monitor'; renderSettings(); };
     document.getElementById('sBack').onclick = () => { view = 'pages'; render(); };
     const setS = (k, v) => { if (!config.settings) config.settings = {}; config.settings[k] = v; markDirty(); };
 
@@ -626,7 +648,7 @@
       document.getElementById('sRotG').onchange = e => { const r = currentRot(); r.cats.grids = e.target.checked; saveRot(r); };
       document.getElementById('sRotD').onchange = e => { const r = currentRot(); r.cats.dashboards = e.target.checked; saveRot(r); };
       document.getElementById('sRotA').onchange = e => { const r = currentRot(); r.cats.apps = e.target.checked; saveRot(r); };
-    } else {
+    } else if (tab === 'hardware') {
       // Lighting writes go straight to the device (and persist in config) via the main process — no Save needed.
       const live = patch => { Object.assign(L, patch); if (!config.settings) config.settings = {}; config.settings.lighting = Object.assign({}, L); configApi.setLighting(patch); };
       document.getElementById('sEffect').value = String(L.effect);
@@ -646,6 +668,13 @@
         const ok = await configApi.saveLightingToDevice();
         msg.textContent = ok ? 'saved to device ✓' : 'save failed';
       };
+    } else {
+      // Monitor mode — knob turn/tap behavior (applied by the main process while in monitor mode)
+      const saveMon = patch => { if (!config.settings) config.settings = {}; config.settings.monitor = Object.assign(currentMon(), patch); markDirty(); };
+      document.getElementById('sMonTurn').value = mon.knobTurn;
+      document.getElementById('sMonTap').value = mon.knobTap;
+      document.getElementById('sMonTurn').onchange = e => saveMon({ knobTurn: e.target.value });
+      document.getElementById('sMonTap').onchange = e => saveMon({ knobTap: e.target.value });
     }
   }
 

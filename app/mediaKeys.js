@@ -31,6 +31,14 @@ function createMediaKeys({ log = () => {} } = {}) {
       if (!robot) return false;
       try { robot.keyTap('v', 'control'); return true; } catch (e) { return false; }
     },
+    // ---- monitor mode: the device (knob/touch) drives the OS cursor while the panel shows the desktop.
+    // Driven only by trusted device input in the main process — never by web/renderer content.
+    available() { return !!robot; },
+    moveMouse(x, y) { if (robot) { try { robot.moveMouse(x, y); } catch (e) {} } },
+    mouseToggle(down, button) { if (robot) { try { robot.mouseToggle(down ? 'down' : 'up', button || 'left'); } catch (e) {} } },
+    click(button) { if (robot) { try { robot.mouseClick(button || 'left'); } catch (e) {} } },
+    scroll(dy) { if (robot) { try { robot.scrollMouse(0, dy); } catch (e) {} } },
+    tapKey(name) { if (robot) { try { robot.keyTap(name); } catch (e) {} } },
   };
 }
 
