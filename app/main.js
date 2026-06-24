@@ -1,6 +1,6 @@
 'use strict';
 // DK-QUAKE launcher: multi-grid panel + PC config editor, on the open Aris68Connector driver.
-const { app, BrowserWindow, Tray, Menu, nativeImage, screen, powerSaveBlocker, ipcMain, shell, dialog, session, net, safeStorage, clipboard } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, screen, powerSaveBlocker, ipcMain, shell, dialog, session, net, safeStorage, clipboard, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -495,6 +495,19 @@ function flushDashCookies() {
   clearTimeout(cookieFlushT);
   cookieFlushT = setTimeout(() => { try { if (dashSession) dashSession.cookies.flushStore(); } catch (e) {} }, 2000);
 }
+// Per-page global hotkeys: register each page's `shortcut` so pressing it (system-wide) jumps the panel
+// to that page. Re-applied on launch and after every editor save; a combo another app owns just fails to
+// register (logged). Requires app-ready.
+function applyShortcuts() {
+  try { globalShortcut.unregisterAll(); } catch (e) {}
+  for (const g of (config.grids || [])) {
+    if (!g.shortcut) continue;
+    try {
+      const ok = globalShortcut.register(g.shortcut, () => { gotoGrid(g.id, true); if (rotateRunning) scheduleRotation(); });
+      if (!ok) console.log('shortcut already in use, not registered:', g.shortcut, '->', g.id);
+    } catch (e) { console.log('shortcut register error:', g.shortcut, '-', e.message); }
+  }
+}
 function rotateTick() {
   const ids = rotationList().map(g => g.id);
   if (ids.length < 2) return;                                  // nothing to cycle through
@@ -648,7 +661,7 @@ app.whenReady().then(async () => {
     config = newCfg;
     if (config.grids.some(g => g.id === active)) config.activeGridId = active;
     else if (!config.grids.some(g => g.id === config.activeGridId)) config.activeGridId = (config.grids[0] || {}).id || null;
-    saveConfig(); pushToPanel(); applyKnobSettings(); refreshTray(); applyRotationSettings(wasRot);
+    saveConfig(); pushToPanel(); applyKnobSettings(); refreshTray(); applyRotationSettings(wasRot); applyShortcuts();
   });
   ipcMain.handle('pickProgram', async (e) => {
     if (!isFrom(e, configWin)) return null;
@@ -670,6 +683,7 @@ app.whenReady().then(async () => {
 
   placePanel();
   if (rotationCfg().enabled) setRotation(true);          // auto-start cycling on launch when enabled
+  applyShortcuts();                                       // register per-page global hotkeys
   const ls = appSettings();
   if (firstRun || ls.launchMode === 'editor') openConfigWindow();
   else if (ls.launchMode === 'minimized') { openConfigWindow(); if (configWin && !configWin.isDestroyed()) configWin.minimize(); }
@@ -708,4 +722,5 @@ app.on('before-quit', () => {
   try { dev.stop(); } catch (e) {}                       // close HID devices + clear keep-alive/rescan timers — an open node-hid handle blocks process exit (Cmd+Q would hang -> force-quit)
   try { if (sysserver) sysserver.stop(); } catch (e) {}  // stop metrics timers + close the local server
   try { if (dashSession) dashSession.cookies.flushStore(); } catch (e) {}   // commit a fresh webview login to disk before exit
+  try { globalShortcut.unregisterAll(); } catch (e) {}   // drop per-page hotkeys
 });

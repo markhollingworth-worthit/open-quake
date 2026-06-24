@@ -11,10 +11,25 @@
   // The <webview> can't be navigated until its first dom-ready — a programmatic src set during the
   // initial about:blank load is silently dropped. Gate the first dashboard navigation on that, so a
   // dashboard set as the start page actually loads instead of sitting on about:blank (a black panel).
-  function navWeb(url) { if (webAttached) web.src = url; else pendingWebUrl = url; }
+  // Per-page "desktop browser identity": some sites (claude.ai, chatgpt.com) refuse to run / sign in
+  // inside an embedded webview. Spoofing a desktop-Chrome UA (changes navigator.userAgent too, not just
+  // the header — that's what bot checks read) makes them treat the panel as a real browser. defaultUA is
+  // captured at first attach, before any override, so a non-spoof page resets cleanly.
+  const DESKTOP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+  let defaultUA = '', pendingDesktop = false, webDesktop = false;
+  function setUA(desktop) { const ua = desktop ? DESKTOP_UA : defaultUA; try { if (ua) web.setUserAgent(ua); } catch (e) {} }
+  function navWeb(url, desktop) {
+    if (webAttached) { setUA(desktop); web.src = url; }
+    else { pendingWebUrl = url; pendingDesktop = desktop; }
+  }
   web.addEventListener('dom-ready', () => {
     webReady = true;
-    if (!webAttached) { webAttached = true; const u = pendingWebUrl; pendingWebUrl = null; if (u) web.src = u; }
+    if (!webAttached) {
+      webAttached = true;
+      try { defaultUA = web.getUserAgent(); } catch (e) {}      // true default (about:blank), before any override
+      const u = pendingWebUrl; pendingWebUrl = null;
+      if (u) { setUA(pendingDesktop); web.src = u; }
+    }
   });
   // Home Assistant has no keyboard on the panel — if a long-lived token is set, seed HA's auth into
   // localStorage so it loads signed-in, then reload into the dashboard. (Standard HA kiosk technique.)
@@ -103,7 +118,8 @@
       haToken = auth.type === 'ha' ? (auth.token || '') : '';   // HA seeds localStorage; basic/header handled in main
       webExternalLinks = !!g.linksExternal;                     // route clicked links to the PC browser (per-page toggle)
       const url = g.url || 'about:blank';
-      if (url !== curUrl) { curUrl = url; webReady = false; haInject = !!haToken; navWeb(url); }
+      const desktop = !!g.desktopUA;                            // spoof desktop-Chrome identity for this page (per-page toggle)
+      if (url !== curUrl || desktop !== webDesktop) { curUrl = url; webDesktop = desktop; webReady = false; haInject = !!haToken; navWeb(url, desktop); }
     } else {                                // tile grid
       webMode = false; web.classList.remove('show'); grid.style.display = 'grid'; build();
     }
