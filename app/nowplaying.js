@@ -23,7 +23,10 @@ const SMTC_PS = [
   "function Await($t,$r){$m=$a.MakeGenericMethod($r);$n=$m.Invoke($null,@($t));$n.Wait(-1)|Out-Null;$n.Result}",
   "[Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager,Windows.Media.Control,ContentType=WindowsRuntime]|Out-Null;",
   "$mgr=Await ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]);",
-  "$c=$mgr.GetCurrentSession();",
+  // Prefer the session that's actually PLAYING — Windows' GetCurrentSession() can point at a paused app
+  // (e.g. Music Assistant) while another (Audiobookshelf) is the one playing. Fall back to current.
+  "$c=$null;foreach($s in $mgr.GetSessions()){try{if($s.GetPlaybackInfo().PlaybackStatus.ToString() -eq 'Playing'){$c=$s;break}}catch{}}",
+  "if(-not $c){$c=$mgr.GetCurrentSession()}",
   "if($c){$p=Await ($c.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties]);$i=$c.GetPlaybackInfo();[pscustomobject]@{title=$p.Title;artist=$p.Artist;album=$p.AlbumTitle;status=$i.PlaybackStatus.ToString();app=$c.SourceAppUserModelId}|ConvertTo-Json -Compress}"
 ].join('');
 const SMTC_B64 = Buffer.from(SMTC_PS, 'utf16le').toString('base64');
@@ -57,7 +60,7 @@ function fetchArt(key, track) {
     lookupArtOnline(track, url => { artCache[key] = url || null; artBusy = false; });
     return;
   }
-  execFile(ART_EXE, [], { windowsHide: true, timeout: 4000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+  execFile(ART_EXE, (track && track.app) ? [track.app] : [], { windowsHide: true, timeout: 4000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
     const b64 = (!err && stdout) ? String(stdout).trim() : '';
     if (b64) { artCache[key] = 'data:' + artMime(b64) + ';base64,' + b64; artBusy = false; return; }
     lookupArtOnline(track, url => { artCache[key] = url || null; artBusy = false; });   // helper had no art -> online fallback

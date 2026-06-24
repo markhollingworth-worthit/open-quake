@@ -10,9 +10,10 @@ using Windows.Media.Control;
 using Windows.Storage.Streams;
 
 class SmtcArt {
-    static int Main() {
+    static int Main(string[] args) {
         try {
-            byte[] bytes = GetArtAsync().GetAwaiter().GetResult();
+            string appId = args.Length > 0 ? args[0] : null;   // optional: target the session now-playing chose
+            byte[] bytes = GetArtAsync(appId).GetAwaiter().GetResult();
             if (bytes != null && bytes.Length > 0)
                 Console.Out.Write(Convert.ToBase64String(bytes));
             return 0;
@@ -21,9 +22,9 @@ class SmtcArt {
         }
     }
 
-    static async Task<byte[]> GetArtAsync() {
+    static async Task<byte[]> GetArtAsync(string appId) {
         var mgr = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
-        var session = mgr.GetCurrentSession();
+        var session = FindSession(mgr, appId);
         if (session == null) return null;
         var props = await session.TryGetMediaPropertiesAsync();
         var thumb = props.Thumbnail;
@@ -37,5 +38,19 @@ class SmtcArt {
             reader.ReadBytes(bytes);
             return bytes;
         }
+    }
+
+    // Prefer the session matching the app id now-playing chose (the playing one), else the OS current.
+    static GlobalSystemMediaTransportControlsSession FindSession(
+        GlobalSystemMediaTransportControlsSessionManager mgr, string appId) {
+        if (!string.IsNullOrEmpty(appId)) {
+            try {
+                foreach (var s in mgr.GetSessions()) {
+                    if (s != null && string.Equals(s.SourceAppUserModelId, appId, StringComparison.OrdinalIgnoreCase))
+                        return s;
+                }
+            } catch { }
+        }
+        return mgr.GetCurrentSession();
     }
 }

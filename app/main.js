@@ -12,12 +12,14 @@ const http = require('http');
 const actionRunner = require('./actionRunner');
 const { createMediaKeys } = require('./mediaKeys');
 const { createSecretStore } = require('./secretStore');
+const nowplaying = require('./nowplaying');   // same singleton sysserver polls — read its snapshot to target transport
 
 const USER_DIR = app.getPath('userData');
 const CONFIG_PATH = path.join(USER_DIR, 'config.json');                  // writable — works inside a packaged app too
 const DEFAULT_CONFIG_PATH = path.join(__dirname, 'config.default.json'); // bundled (read-only)
 const LEGACY_CONFIG_PATH = path.join(__dirname, 'config.json');          // pre-userData dev location, migrated once
 const APPS_DIR = path.join(__dirname, '..', 'apps').replace('app.asar', 'app.asar.unpacked'); // unpacked when packaged
+const SMTC_CTL_EXE = path.join(__dirname, 'native', 'smtc-control.exe').replace('app.asar', 'app.asar.unpacked'); // SMTC transport helper (Windows)
 const LED_DEFAULT = { effect: 1, brightness: 200, speed: 128, hue: 128, sat: 255 }; // ring lighting fallback (effect 1 = Solid Color)
 const THEME_DEFAULT = { appearance: 'system', accent: '#7CFFB2', presets: ['#7CFFB2', '#38B6FF', '#FF4040', '#FFB000'] };
 const DEFAULT_SETTINGS = { launchMode: 'editor', micOnLaunch: false, lighting: Object.assign({}, LED_DEFAULT), theme: Object.assign({}, THEME_DEFAULT) };
@@ -425,9 +427,22 @@ function pasteText(value) {
   setTimeout(() => { try { mediaKeys.pasteShortcut(); } catch (e) { console.log('pasteText keystroke error:', e.message); } }, 30);
 }
 
-// Media transport for the Music page. The adapter keeps the backend narrow:
-// macOS helper first, robotjs fallback, and no arbitrary keyboard/mouse access here.
+// Media transport for the Music page. On Windows, drive the *exact* SMTC session the now-playing display
+// is showing (matched by its app id) so the buttons control the same source — not whatever app currently
+// owns the global media keys (which splits control from the display when several players are open). Fall
+// back to the media-key tap if the helper can't act (no session, helper missing) or off-Windows.
+const SMTC_CTL_CMDS = { playpause: 1, next: 1, prev: 1 };
 function mediaKey(cmd) {
+  if (process.platform === 'win32' && SMTC_CTL_CMDS[cmd] && fs.existsSync(SMTC_CTL_EXE)) {
+    const snap = nowplaying.getSnapshot();
+    const args = (snap && snap.app) ? [cmd, snap.app] : [cmd];   // target the displayed session by app id
+    try {
+      execFile(SMTC_CTL_EXE, args, { windowsHide: true, timeout: 4000 }, (err, stdout) => {
+        if (err || String(stdout || '').trim() !== 'ok') mediaKeys.transport(cmd);   // helper miss -> media key
+      });
+      return true;
+    } catch (e) { return mediaKeys.transport(cmd); }
+  }
   return mediaKeys.transport(cmd);
 }
 
