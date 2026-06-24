@@ -133,7 +133,20 @@
       webExternalLinks = !!g.linksExternal;                     // route clicked links to the PC browser (per-page toggle)
       const url = g.url || 'about:blank';
       const desktop = !!g.desktopUA;                            // spoof desktop-Chrome identity for this page (per-page toggle)
-      if (url !== curUrl || desktop !== webDesktop) { curUrl = url; webDesktop = desktop; webReady = false; haInject = !!haToken; navWeb(url, desktop); }
+      if (url !== curUrl || desktop !== webDesktop) {
+        // App-page options (World Clock analog/digital, Flip Clock settings, …) ride in the URL fragment
+        // (#…). A src/loadURL set to a hash-only-different URL is a same-document fragment nav that never
+        // reloads, so the page never re-read its options — the change only showed after leaving and
+        // returning. When only the fragment changed on one of our own app pages, drive the guest's
+        // location.hash directly: that always fires `hashchange`, and the page re-renders from it live.
+        const hashOnly = !!curUrl && desktop === webDesktop && url.split('#')[0] === curUrl.split('#')[0];
+        if (hashOnly && webThemed && webAttached) {
+          curUrl = url;
+          web.executeJavaScript('location.hash=' + JSON.stringify('#' + (url.split('#')[1] || ''))).catch(() => {});
+        } else {
+          curUrl = url; webDesktop = desktop; webReady = false; haInject = !!haToken; navWeb(url, desktop);
+        }
+      }
     } else {                                // tile grid
       webMode = false; web.classList.remove('show'); grid.style.display = 'grid'; build();
     }

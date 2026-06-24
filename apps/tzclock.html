@@ -45,41 +45,13 @@
     });
     return o;
   }
-  const O = readOpts();
-  const isUS = (O.mode || 'us') === 'us';
-  const analog = O.display === 'analog';
-  const fmt24 = O.format === '24';
-  const showSec = O.seconds === '1' || O.seconds === 'true';
-
-  // theme (passed by the host: _dark=1/0, _accent=#hex) — fall back to a per-app color choice if present
-  document.body.classList.toggle('light', O._dark === '0');
   const ACCENT_NAMES = { green:'#2bff88', red:'#ff4040', amber:'#ffb000', blue:'#38b6ff', white:'#eef4ff' };
-  const accent = /^#[0-9a-fA-F]{6}$/.test(O._accent || '') ? O._accent : (ACCENT_NAMES[O.color] || null);
-  if (accent) document.documentElement.style.setProperty('--accent', accent);
-
   const US_ZONES = [['US/Pacific','Pacific'], ['US/Mountain','Mountain'], ['US/Central','Central'], ['US/Eastern','Eastern']];
   const prettify = z => (z || '').split('/').pop().replace(/_/g, ' ');
-
-  let cells;
-  if (isUS) cells = US_ZONES.map(([zone, label]) => ({ zone, label }));
-  else {
-    cells = [];
-    for (let i = 1; i <= 6; i++) { const z = O['c' + i]; if (z) cells.push({ zone: z, label: (O['l' + i] && O['l' + i].trim()) ? O['l' + i].trim() : prettify(z) }); }
-    if (!cells.length) cells = US_ZONES.map(([zone, label]) => ({ zone, label }));
-  }
-
-  const n = cells.length;
-  let cols, rows;
-  if (isUS) { if (O.usLayout === 'grid') { cols = 2; rows = 2; } else { cols = 4; rows = 1; } }
-  else if (n <= 3) { cols = n; rows = 1; }
-  else { cols = Math.ceil(n / 2); rows = 2; }
-
   const grid = document.getElementById('grid');
-  grid.style.gridTemplateColumns = 'repeat(' + cols + ',1fr)';
-  grid.style.gridTemplateRows = 'repeat(' + rows + ',1fr)';
-  const cellW = 1920 / cols, cellH = 480 / rows;
+  let timer = null;
 
-  // ---- time helpers (DST-correct via Intl) ----
+  // ---- time helper (DST-correct via Intl) ----
   function partsIn(zone) {
     try {
       const p = {};
@@ -88,95 +60,134 @@
       return p;
     } catch (e) { return { hour: 0, minute: 0, second: 0 }; }
   }
-  function digitalString(zone) {
-    try {
-      const opt = { timeZone: zone, hour: 'numeric', minute: '2-digit', hour12: !fmt24 };
-      if (showSec) opt.second = '2-digit';
-      return new Intl.DateTimeFormat('en-US', opt).format(new Date());
-    } catch (e) { return '--:--'; }
-  }
 
-  if (analog) buildAnalog(); else buildDigital();
+  // Render from the current options. Re-run on hashchange so a Save in the editor (which only changes the
+  // URL fragment — mode / display / seconds / cities / theme) applies live without leaving the page.
+  function render() {
+    if (timer) { clearInterval(timer); timer = null; }
+    const O = readOpts();
+    const isUS = (O.mode || 'us') === 'us';
+    const analog = O.display === 'analog';
+    const fmt24 = O.format === '24';
+    const showSec = O.seconds === '1' || O.seconds === 'true';
 
-  // ===================== DIGITAL =====================
-  function buildDigital() {
-    cells.forEach((c, i) => {
-      const cell = document.createElement('div'); cell.className = 'cell digital';
-      if ((i % cols) === cols - 1) cell.classList.add('edge');
-      const t = document.createElement('div'); t.className = 'time';
-      const l = document.createElement('div'); l.className = 'label'; l.textContent = c.label;
-      cell.appendChild(t); cell.appendChild(l); grid.appendChild(cell);
-      c.el = t; c.lb = l;
-    });
-    const sample = '88:88' + (showSec ? ':88' : '') + (fmt24 ? '' : ' PM');
-    const probe = cells[0].el; let size = Math.min(cellH * 0.5, 300);
-    probe.style.fontSize = size + 'px'; probe.textContent = sample; let g = 0;
-    while (probe.scrollWidth > cellW * 0.86 && size > 16 && g++ < 400) { size -= 3; probe.style.fontSize = size + 'px'; }
-    const labelSize = Math.max(13, Math.min(cellH * 0.13, 38));
-    cells.forEach(c => { c.el.style.fontSize = size + 'px'; c.lb.style.fontSize = labelSize + 'px'; });
-    function paint(el, zone) {
-      const s = digitalString(zone), m = s.match(/\s?(AM|PM)$/i);
-      if (m) { el.textContent = s.slice(0, m.index); const ap = document.createElement('span'); ap.className = 'ampm'; ap.textContent = m[1].toUpperCase(); el.appendChild(ap); }
-      else el.textContent = s;
+    document.body.classList.toggle('light', O._dark === '0');
+    const accent = /^#[0-9a-fA-F]{6}$/.test(O._accent || '') ? O._accent : (ACCENT_NAMES[O.color] || null);
+    if (accent) document.documentElement.style.setProperty('--accent', accent);
+
+    let cells;
+    if (isUS) cells = US_ZONES.map(([zone, label]) => ({ zone, label }));
+    else {
+      cells = [];
+      for (let i = 1; i <= 6; i++) { const z = O['c' + i]; if (z) cells.push({ zone: z, label: (O['l' + i] && O['l' + i].trim()) ? O['l' + i].trim() : prettify(z) }); }
+      if (!cells.length) cells = US_ZONES.map(([zone, label]) => ({ zone, label }));
     }
-    const tick = () => cells.forEach(c => paint(c.el, c.zone));
-    tick(); setInterval(tick, 1000);
-  }
 
-  // ===================== ANALOG =====================
-  function buildAnalog() {
-    const padTop = 16;
-    grid.style.padding = padTop + 'px 0 6px';                                  // breathing room above the top row of faces
-    const availH = (480 - padTop - 6) / rows;
-    const labelSize = Math.max(13, Math.min(availH * 0.12, 32));
-    const subSize = Math.max(12, labelSize * 0.7);
-    const dia = Math.min(cellW * 0.78, availH * (rows === 1 ? 0.6 : 0.64));    // face diameter
-    const R = 50, NS = 'http://www.w3.org/2000/svg';
-    cells.forEach((c, i) => {
-      const cell = document.createElement('div'); cell.className = 'cell analog';
-      if ((i % cols) === cols - 1) cell.classList.add('edge');
-      const svg = document.createElementNS(NS, 'svg');
-      svg.setAttribute('class', 'face'); svg.setAttribute('viewBox', '0 0 100 100');
-      svg.setAttribute('width', dia); svg.setAttribute('height', dia);
-      const ring = document.createElementNS(NS, 'circle');
-      ring.setAttribute('class', 'ring'); ring.setAttribute('cx', R); ring.setAttribute('cy', R); ring.setAttribute('r', 47); ring.setAttribute('stroke-width', 2);
-      svg.appendChild(ring);
-      for (let h = 0; h < 12; h++) {
-        const a = h * 30 * Math.PI / 180, big = h % 3 === 0;
-        const r1 = big ? 38 : 41, r2 = 45;
-        const ln = document.createElementNS(NS, 'line');
-        ln.setAttribute('class', big ? 'tickH' : 'tick');
-        ln.setAttribute('x1', R + r1 * Math.sin(a)); ln.setAttribute('y1', R - r1 * Math.cos(a));
-        ln.setAttribute('x2', R + r2 * Math.sin(a)); ln.setAttribute('y2', R - r2 * Math.cos(a));
-        ln.setAttribute('stroke-width', big ? 2.4 : 1.4);
-        svg.appendChild(ln);
-      }
-      const hourH = document.createElementNS(NS, 'line'); hourH.setAttribute('class', 'hand'); hourH.setAttribute('stroke-width', 3.4);
-      const minH = document.createElementNS(NS, 'line'); minH.setAttribute('class', 'hand'); minH.setAttribute('stroke-width', 2.4);
-      const secH = document.createElementNS(NS, 'line'); secH.setAttribute('class', 'sec'); secH.setAttribute('stroke-width', 1);
-      svg.appendChild(hourH); svg.appendChild(minH); if (showSec) svg.appendChild(secH);
-      const pin = document.createElementNS(NS, 'circle'); pin.setAttribute('class', 'pin'); pin.setAttribute('cx', R); pin.setAttribute('cy', R); pin.setAttribute('r', 2.4); svg.appendChild(pin);
-      const l = document.createElement('div'); l.className = 'label'; l.style.fontSize = labelSize + 'px'; l.style.marginTop = (dia * 0.05) + 'px'; l.textContent = c.label;
-      const sub = document.createElement('div'); sub.className = 'sub'; sub.style.fontSize = subSize + 'px';
-      cell.appendChild(svg); cell.appendChild(l); cell.appendChild(sub); grid.appendChild(cell);
-      c.hourH = hourH; c.minH = minH; c.secH = secH; c.sub = sub;
-    });
-    function hand(el, ang, len) {
-      const a = ang * Math.PI / 180;
-      el.setAttribute('x1', 50 - 12 * Math.sin(a)); el.setAttribute('y1', 50 + 12 * Math.cos(a));
-      el.setAttribute('x2', 50 + len * Math.sin(a)); el.setAttribute('y2', 50 - len * Math.cos(a));
+    const n = cells.length;
+    let cols, rows;
+    if (isUS) { if (O.usLayout === 'grid') { cols = 2; rows = 2; } else { cols = 4; rows = 1; } }
+    else if (n <= 3) { cols = n; rows = 1; }
+    else { cols = Math.ceil(n / 2); rows = 2; }
+
+    grid.innerHTML = '';                                  // drop a prior render
+    grid.style.padding = '';                              // reset (analog adds top padding)
+    grid.style.gridTemplateColumns = 'repeat(' + cols + ',1fr)';
+    grid.style.gridTemplateRows = 'repeat(' + rows + ',1fr)';
+    const cellW = 1920 / cols, cellH = 480 / rows;
+
+    function digitalString(zone) {
+      try {
+        const opt = { timeZone: zone, hour: 'numeric', minute: '2-digit', hour12: !fmt24 };
+        if (showSec) opt.second = '2-digit';
+        return new Intl.DateTimeFormat('en-US', opt).format(new Date());
+      } catch (e) { return '--:--'; }
     }
-    function tick() {
-      cells.forEach(c => {
-        const p = partsIn(c.zone);
-        hand(c.hourH, ((p.hour % 12) + p.minute / 60) * 30, 26);
-        hand(c.minH, (p.minute + p.second / 60) * 6, 37);
-        if (showSec) hand(c.secH, p.second * 6, 40);
-        c.sub.textContent = digitalString(c.zone);
+
+    if (analog) buildAnalog(); else buildDigital();
+
+    // ===================== DIGITAL =====================
+    function buildDigital() {
+      cells.forEach((c, i) => {
+        const cell = document.createElement('div'); cell.className = 'cell digital';
+        if ((i % cols) === cols - 1) cell.classList.add('edge');
+        const t = document.createElement('div'); t.className = 'time';
+        const l = document.createElement('div'); l.className = 'label'; l.textContent = c.label;
+        cell.appendChild(t); cell.appendChild(l); grid.appendChild(cell);
+        c.el = t; c.lb = l;
       });
+      const sample = '88:88' + (showSec ? ':88' : '') + (fmt24 ? '' : ' PM');
+      const probe = cells[0].el; let size = Math.min(cellH * 0.5, 300);
+      probe.style.fontSize = size + 'px'; probe.textContent = sample; let g = 0;
+      while (probe.scrollWidth > cellW * 0.86 && size > 16 && g++ < 400) { size -= 3; probe.style.fontSize = size + 'px'; }
+      const labelSize = Math.max(13, Math.min(cellH * 0.13, 38));
+      cells.forEach(c => { c.el.style.fontSize = size + 'px'; c.lb.style.fontSize = labelSize + 'px'; });
+      function paint(el, zone) {
+        const s = digitalString(zone), m = s.match(/\s?(AM|PM)$/i);
+        if (m) { el.textContent = s.slice(0, m.index); const ap = document.createElement('span'); ap.className = 'ampm'; ap.textContent = m[1].toUpperCase(); el.appendChild(ap); }
+        else el.textContent = s;
+      }
+      const tick = () => cells.forEach(c => paint(c.el, c.zone));
+      tick(); timer = setInterval(tick, 1000);
     }
-    tick(); setInterval(tick, 1000);
+
+    // ===================== ANALOG =====================
+    function buildAnalog() {
+      const padTop = 16;
+      grid.style.padding = padTop + 'px 0 6px';                                  // breathing room above the top row of faces
+      const availH = (480 - padTop - 6) / rows;
+      const labelSize = Math.max(13, Math.min(availH * 0.12, 32));
+      const subSize = Math.max(12, labelSize * 0.7);
+      const dia = Math.min(cellW * 0.78, availH * (rows === 1 ? 0.6 : 0.64));    // face diameter
+      const R = 50, NS = 'http://www.w3.org/2000/svg';
+      cells.forEach((c, i) => {
+        const cell = document.createElement('div'); cell.className = 'cell analog';
+        if ((i % cols) === cols - 1) cell.classList.add('edge');
+        const svg = document.createElementNS(NS, 'svg');
+        svg.setAttribute('class', 'face'); svg.setAttribute('viewBox', '0 0 100 100');
+        svg.setAttribute('width', dia); svg.setAttribute('height', dia);
+        const ring = document.createElementNS(NS, 'circle');
+        ring.setAttribute('class', 'ring'); ring.setAttribute('cx', R); ring.setAttribute('cy', R); ring.setAttribute('r', 47); ring.setAttribute('stroke-width', 2);
+        svg.appendChild(ring);
+        for (let h = 0; h < 12; h++) {
+          const a = h * 30 * Math.PI / 180, big = h % 3 === 0;
+          const r1 = big ? 38 : 41, r2 = 45;
+          const ln = document.createElementNS(NS, 'line');
+          ln.setAttribute('class', big ? 'tickH' : 'tick');
+          ln.setAttribute('x1', R + r1 * Math.sin(a)); ln.setAttribute('y1', R - r1 * Math.cos(a));
+          ln.setAttribute('x2', R + r2 * Math.sin(a)); ln.setAttribute('y2', R - r2 * Math.cos(a));
+          ln.setAttribute('stroke-width', big ? 2.4 : 1.4);
+          svg.appendChild(ln);
+        }
+        const hourH = document.createElementNS(NS, 'line'); hourH.setAttribute('class', 'hand'); hourH.setAttribute('stroke-width', 3.4);
+        const minH = document.createElementNS(NS, 'line'); minH.setAttribute('class', 'hand'); minH.setAttribute('stroke-width', 2.4);
+        const secH = document.createElementNS(NS, 'line'); secH.setAttribute('class', 'sec'); secH.setAttribute('stroke-width', 1);
+        svg.appendChild(hourH); svg.appendChild(minH); if (showSec) svg.appendChild(secH);
+        const pin = document.createElementNS(NS, 'circle'); pin.setAttribute('class', 'pin'); pin.setAttribute('cx', R); pin.setAttribute('cy', R); pin.setAttribute('r', 2.4); svg.appendChild(pin);
+        const l = document.createElement('div'); l.className = 'label'; l.style.fontSize = labelSize + 'px'; l.style.marginTop = (dia * 0.05) + 'px'; l.textContent = c.label;
+        const sub = document.createElement('div'); sub.className = 'sub'; sub.style.fontSize = subSize + 'px';
+        cell.appendChild(svg); cell.appendChild(l); cell.appendChild(sub); grid.appendChild(cell);
+        c.hourH = hourH; c.minH = minH; c.secH = secH; c.sub = sub;
+      });
+      function hand(el, ang, len) {
+        const a = ang * Math.PI / 180;
+        el.setAttribute('x1', 50 - 12 * Math.sin(a)); el.setAttribute('y1', 50 + 12 * Math.cos(a));
+        el.setAttribute('x2', 50 + len * Math.sin(a)); el.setAttribute('y2', 50 - len * Math.cos(a));
+      }
+      function tick() {
+        cells.forEach(c => {
+          const p = partsIn(c.zone);
+          hand(c.hourH, ((p.hour % 12) + p.minute / 60) * 30, 26);
+          hand(c.minH, (p.minute + p.second / 60) * 6, 37);
+          if (showSec) hand(c.secH, p.second * 6, 40);
+          c.sub.textContent = digitalString(c.zone);
+        });
+      }
+      tick(); timer = setInterval(tick, 1000);
+    }
   }
+
+  render();
+  window.addEventListener('hashchange', render);
 </script>
 </body>
 </html>
