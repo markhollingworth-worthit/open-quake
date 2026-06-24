@@ -56,8 +56,11 @@ function applyTheme() {
   pushTheme();
   applyKnobSettings();
 }
+// Theme payload: per-card light/dark + accent for the active page, PLUS the global light/dark so the
+// panel's page-menu/intro overlays can stay in the user's chosen mode even on a per-card-overridden page.
+function themePayload() { return Object.assign({}, effectiveTheme(activeGrid()), { globalDark: effectiveTheme(null).dark }); }
 function pushTheme() {
-  if (panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('theme', effectiveTheme(activeGrid()));
+  if (panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('theme', themePayload());
 }
 // hex -> {hue,sat} (0..255), value fixed full — matches the editor/DK-Suite ring conversion.
 function hexToHsv255(hex) {
@@ -262,7 +265,7 @@ async function pushToPanel() {
   if (panelWin && !panelWin.isDestroyed()) {
     const g = activeGrid();
     syncPollers(g);                                                // run only the poller the shown page needs (before the webview reloads, so it primes)
-    panelWin.webContents.send('theme', effectiveTheme(g));         // light/dark + accent for this page (chrome paints before the grid renders)
+    panelWin.webContents.send('theme', themePayload());            // light/dark + accent for this page (chrome paints before the grid renders)
     panelWin.webContents.send('grid', await resolveGridIcons(g));
     panelWin.webContents.send('gridList', { grids: gridList(), activeId: config.activeGridId });
     pushRotationState();
@@ -358,7 +361,7 @@ function sweepIconCache() {
 }
 // Resolve app/image icons to a data: URL the panel renderer can draw (works in native + http pages).
 async function resolveGridIcons(grid) {
-  if (grid.kind === 'app') return { ...grid, kind: 'web', url: appPageUrl(grid) };   // render the local app in the webview
+  if (grid.kind === 'app') return { ...grid, kind: 'web', url: appPageUrl(grid), themed: true };   // render the local app in the webview; themed:true -> panel injects live light/dark + accent
   if (grid.kind === 'web') return grid;   // dashboard page — no tiles to resolve
   const tiles = await Promise.all((grid.tiles || []).map(async t => {
     const out = { ...t };

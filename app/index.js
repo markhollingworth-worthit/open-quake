@@ -8,6 +8,7 @@
   let selOpen = false, selIdx = 0, selAutoClose = null;
   let webMode = false, curUrl = '', webReady = false, webDown = false, lastWeb = { x: 0, y: 0 }, webIdle = null;
   let haToken = '', haInject = false, webExternalLinks = false, webAttached = false, pendingWebUrl = null;
+  let webThemed = false, lastTheme = null;   // our served app pages (Music/Chat): inject live light/dark + accent into the guest
   // The <webview> can't be navigated until its first dom-ready — a programmatic src set during the
   // initial about:blank load is silently dropped. Gate the first dashboard navigation on that, so a
   // dashboard set as the start page actually loads instead of sitting on about:blank (a black panel).
@@ -33,6 +34,18 @@
   });
   // Home Assistant has no keyboard on the panel — if a long-lived token is set, seed HA's auth into
   // localStorage so it loads signed-in, then reload into the dashboard. (Standard HA kiosk technique.)
+  // Our served app pages (Music/Chat) already encode the theme in their URL, but injecting it on every
+  // load (and on every live theme change) makes them bulletproof against a stale cache and lets the
+  // theme update without a full reload. Runs in the host's isolated world, so the page CSP doesn't block it.
+  function injectWebTheme() {
+    if (!webThemed || !webReady || !lastTheme) return;
+    const dark = !!lastTheme.dark, accent = lastTheme.accent || '';
+    web.executeJavaScript(
+      'document.body.classList.toggle("light",' + (!dark) + ');' +
+      (accent ? 'document.documentElement.style.setProperty("--accent",' + JSON.stringify(accent) + ');' : '')
+    ).catch(function () {});
+  }
+  web.addEventListener('did-finish-load', injectWebTheme);
   web.addEventListener('did-finish-load', () => {
     if (!haInject || !haToken) return;
     haInject = false;
@@ -114,6 +127,7 @@
     cfg = g;
     if (g && g.kind === 'web') {            // dashboard page -> show the webview
       webMode = true; grid.style.display = 'none'; web.classList.add('show');
+      webThemed = !!g.themed;               // our served app page -> inject light/dark + accent on load
       const auth = g.auth || {};
       haToken = auth.type === 'ha' ? (auth.token || '') : '';   // HA seeds localStorage; basic/header handled in main
       webExternalLinks = !!g.linksExternal;                     // route clicked links to the PC browser (per-page toggle)
@@ -125,8 +139,10 @@
     }
   });
   panelApi.onTheme(t => {
-    document.body.classList.toggle('light', !(t && t.dark));
+    document.body.classList.toggle('light', !(t && t.dark));            // per-card: grid tiles + webview chrome
+    document.body.classList.toggle('glight', !(t && t.globalDark));     // global: page-menu / intro / volume overlays
     if (t && t.accent) document.documentElement.style.setProperty('--accent', t.accent);
+    lastTheme = t; injectWebTheme();                                    // push the theme live into a served app page (no reload needed)
   });
   panelApi.onGridList(d => { grids = d.grids; activeId = d.activeId; if (selOpen) renderWheel(); });
   panelApi.onRotation(r => { rotEnabled = !!r.enabled; rotRunning = !!r.running; if (selOpen) renderWheel(); });

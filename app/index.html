@@ -11,6 +11,14 @@
   body.light { --bg1:#eef3f8; --bg2:#dde7f0; --tile1:#ffffff; --tile2:#eef3f8; --tile-bd:#c4d2e0;
     --tile-fg:#1c2a39; --tile-lb:#5a6c7e; --empty-bg:#e7eef5; --empty-bd:#cdd9e5;
     --overlay:rgba(244,248,251,.94); --txt:#1c2a39; --sel-dim:#8499ac; --sel-on:#102030; --val:#102030; }
+  /* The page-menu, intro, and volume overlays are app chrome — they ALWAYS follow the global
+     light/dark from Settings, never a per-card appearance override (which only repaints the grid).
+     body.glight reflects the global theme; these element-scoped vars win over the body.light set
+     by a per-card override, so the menu stays in the user's chosen mode on every page. */
+  body:not(.glight) #selector, body:not(.glight) #intro, body:not(.glight) #vol {
+    --overlay:rgba(3,6,10,.93); --txt:#e8eef6; --sel-dim:#5f7790; --sel-on:#ffffff; --tile-lb:#9fb3c8; }
+  body.glight #selector, body.glight #intro, body.glight #vol {
+    --overlay:rgba(244,248,251,.94); --txt:#1c2a39; --sel-dim:#8499ac; --sel-on:#102030; --tile-lb:#5a6c7e; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
   #stage { position: absolute; top: 0; left: 0; width: 1920px; height: 480px;
     transform-origin: 0 0; transform: translate(480px, 0) rotate(90deg);

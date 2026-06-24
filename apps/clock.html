@@ -148,7 +148,7 @@
     const ch = settings.seconds ? 50 : 64;          // card height in vh
     r.setProperty('--ch', ch + 'vh');
     r.setProperty('--cw', (ch * 0.66) + 'vh');
-    r.setProperty('--cw2', (ch * 1.04) + 'vh');    // single hour card (12h), ~20% narrower
+    r.setProperty('--cw2', (ch * 1.28) + 'vh');    // single hour card (12h): wide enough for a 2-digit hour (10-12) without clipping the right edge
     r.setProperty('--fs', (ch * 0.92) + 'vh');
   }
 
