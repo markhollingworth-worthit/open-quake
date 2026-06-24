@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Galactic Information Network</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="gin-shell" aria-label="Galactic Information Network panel">
+    <header class="gin-header">
+      <div class="brand-block">
+        <div class="kicker">Open-Quake Relay</div>
+        <h1>Galactic Information Network</h1>
+      </div>
+      <dl class="status-strip" aria-label="Relay status">
+        <div>
+          <dt>Feed Mode</dt>
+          <dd id="feedMode">DEMO</dd>
+        </div>
+        <div>
+          <dt>Sources</dt>
+          <dd id="sourceCount">24</dd>
+        </div>
+        <div>
+          <dt>Signal</dt>
+          <dd id="signalStatus">STABLE</dd>
+        </div>
+        <div>
+          <dt>Last Refresh</dt>
+          <dd id="lastRefresh">--:--</dd>
+        </div>
+      </dl>
+      <div class="quality" aria-label="Signal quality">
+        <span>Signal Quality</span>
+        <b id="qualityBars">████████░░</b>
+      </div>
+    </header>
+
+    <section class="main-grid">
+      <section class="map-panel" id="mapPanel" aria-label="Fictional galactic network map">
+        <div class="map-heading">
+          <span>Network Cartography</span>
+          <strong id="routeLabel">SOL -> ALIOTH</strong>
+        </div>
+        <svg id="galaxyMap" class="galaxy-map" viewBox="0 0 720 330" role="img" aria-label="Stylized galactic transmission map"></svg>
+      </section>
+
+      <article class="article-panel" aria-live="polite">
+        <div id="incoming" class="incoming hidden">
+          <span>Incoming Transmission</span>
+          <strong id="incomingSource">SOURCE: SOL</strong>
+          <em id="incomingCategory">CATEGORY: RESEARCH</em>
+          <b>ESTABLISHING LINK...</b>
+        </div>
+        <div id="articleContent" class="article-content">
+          <div class="article-meta">
+            <span id="articleSource">SOURCE: SOL</span>
+            <span id="articleCategory">CATEGORY: RESEARCH</span>
+            <span id="articleAge">RECEIVED NOW</span>
+          </div>
+          <h2 id="headline">Relay Synchronizing</h2>
+          <p id="summary">The Galactic Information Network is acquiring beacon telemetry from local and long-range transmission buffers.</p>
+        </div>
+      </article>
+    </section>
+
+    <footer class="ticker-band" id="tickerBand" aria-label="Continuous news ticker">
+      <div class="ticker-track" id="tickerTrack"></div>
+    </footer>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -34,8 +34,35 @@
     "served": true,
     "options": [
       { "key": "endpoint", "label": "Open WebUI chat URL (…/api/chat/completions)", "type": "text", "default": "" },
-      { "key": "api_key",  "label": "API key",                                       "type": "secret", "default": "", "help": "In Open WebUI: avatar (bottom-left) → Settings → Account → API Keys → Create new secret key (an admin may need to enable API keys first in Admin Panel → Settings → General → turn Enable API Keys on)." },
+      { "key": "api_key",  "label": "API key",                                       "type": "secret", "default": "", "help": "In Open WebUI: avatar (bottom-left) → Settings → Account → API Keys → Create new secret key (an admin may need to enable API keys first)." },
       { "key": "model",    "label": "Model (required, e.g. llama3.2)",               "type": "text", "default": "" }
+    ]
+  },
+  {
+    "id": "openaiusagepop",
+    "name": "OpenAI Usage Pulse",
+    "file": "openaiusage.pop.html",
+    "served": true,
+    "options": [
+      { "key": "api_key", "label": "OpenAI API key", "type": "secret", "default": "" },
+      { "key": "org", "label": "Organization ID", "type": "text", "default": "" },
+      { "key": "project", "label": "Project ID", "type": "text", "default": "" },
+      { "key": "days", "label": "Window (days)", "type": "select", "default": "7", "choices": [["1", "1"], ["7", "7"], ["30", "30"], ["90", "90"]] },
+      { "key": "autorefresh", "label": "Auto refresh", "type": "bool", "default": true },
+      { "key": "refreshSecs", "label": "Refresh", "type": "select", "default": "60", "choices": [["30", "30 seconds"], ["60", "1 minute"], ["120", "2 minutes"], ["300", "5 minutes"]] }
+    ]
+  },
+  {
+    "id": "worldcuptracker",
+    "name": "FIFA World Cup Tracker",
+    "file": "worldcup.tracker.html",
+    "served": true,
+    "options": [
+      { "key": "year", "label": "Tournament", "type": "select", "default": "2026", "choices": [["2026", "2026"], ["2022", "2022"], ["2018", "2018"], ["2014", "2014"]] },
+      { "key": "api_key", "label": "API-Football key", "type": "secret", "default": "" },
+      { "key": "focus_team", "label": "Focus team (optional)", "type": "text", "default": "" },
+      { "key": "show_completed", "label": "Show completed matches", "type": "bool", "default": true },
+      { "key": "refresh", "label": "Refresh", "type": "select", "default": "60", "choices": [["30", "30 seconds"], ["60", "1 minute"], ["120", "2 minutes"], ["300", "5 minutes"], ["900", "15 minutes"]] }
     ]
   }
 ]

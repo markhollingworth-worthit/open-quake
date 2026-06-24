@@ -1,0 +1,202 @@
+:root {
+  --rows: 6;
+  --columns: 64;
+  --tile-gap: 2px;
+  --tile-radius: 4px;
+  --tile-bg: #0b0b09;
+  --tile-face: #151510;
+  --tile-edge: #020202;
+  --tile-text: #ffe08c;
+  --tile-muted: #fff6d7;
+  --warn: #ffb247;
+  --error: #ff6b58;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 220, 130, 0.08), transparent 42%),
+    linear-gradient(180deg, #090907 0%, #030303 100%);
+  color: var(--tile-text);
+}
+
+body {
+  font-family: "Arial Narrow", "Roboto Condensed", "Liberation Sans Narrow", "Courier New", monospace;
+}
+
+.board-shell {
+  width: 100vw;
+  height: 100vh;
+  max-width: 1920px;
+  max-height: 480px;
+  margin: 0 auto;
+  padding: clamp(6px, 1.4vh, 12px) clamp(8px, 0.9vw, 16px);
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04), transparent 8%, transparent 92%, rgba(255, 255, 255, 0.035)),
+    #070706;
+}
+
+.split-board {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-rows: repeat(var(--rows), minmax(0, 1fr));
+  gap: clamp(6px, 1.25vh, 9px);
+  padding: clamp(5px, 1vh, 8px);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 8%, transparent 92%, rgba(0, 0, 0, 0.8)),
+    #10100d;
+  border: 1px solid #282417;
+  box-shadow:
+    inset 0 0 0 2px #050505,
+    inset 0 18px 28px rgba(255, 242, 176, 0.03),
+    0 14px 36px rgba(0, 0, 0, 0.72);
+}
+
+.board-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--columns), minmax(0, 1fr));
+  gap: var(--tile-gap);
+}
+
+.board-row[role="link"] {
+  cursor: pointer;
+}
+
+.board-row[role="link"]:focus-visible {
+  outline: 2px solid rgba(255, 210, 107, 0.82);
+  outline-offset: 3px;
+}
+
+.board-row[role="link"]:active .tile {
+  filter: brightness(1.18);
+}
+
+.tile {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--tile-radius);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), transparent 48%, rgba(0, 0, 0, 0.42) 52%, rgba(255, 255, 255, 0.025)),
+    var(--tile-bg);
+  border: 1px solid #302916;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.75),
+    0 1px 2px rgba(0, 0, 0, 0.7);
+  color: var(--tile-text);
+  font-size: min(clamp(21px, 6.25vh, 42px), calc((100vw - 48px) / var(--columns) * 1.08));
+  font-weight: 760;
+  line-height: 1;
+  text-align: center;
+  text-transform: uppercase;
+  perspective: 220px;
+}
+
+.tile::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(50% - 1px);
+  height: 2px;
+  z-index: 3;
+  background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.85) 16%, rgba(255, 226, 160, 0.1) 50%, rgba(0, 0, 0, 0.85) 84%, transparent);
+}
+
+.tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 38%, rgba(0, 0, 0, 0.42) 51%, transparent 62%, rgba(255, 255, 255, 0.025)),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.42), transparent 18%, transparent 82%, rgba(0, 0, 0, 0.42));
+}
+
+.glyph {
+  z-index: 1;
+  width: 100%;
+  transform-origin: 50% 50%;
+  text-shadow:
+    0 0 7px rgba(255, 198, 92, 0.36),
+    0 1px 0 rgba(0, 0, 0, 0.9);
+}
+
+.tile.space .glyph {
+  opacity: 0;
+}
+
+.tile.warn {
+  color: var(--warn);
+}
+
+.tile.error {
+  color: var(--error);
+}
+
+.tile.flip .glyph {
+  animation: flap var(--flip-duration, 520ms) cubic-bezier(0.2, 0.7, 0.1, 1) both;
+}
+
+.tile.spooling {
+  color: #fff0b8;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.78),
+    0 0 10px rgba(255, 178, 62, 0.16);
+}
+
+@keyframes flap {
+  0% {
+    opacity: 0.25;
+    transform: rotateX(-84deg) scaleY(0.78);
+    filter: brightness(0.55);
+  }
+  42% {
+    opacity: 1;
+    transform: rotateX(18deg) scaleY(1.04);
+    filter: brightness(1.35);
+  }
+  68% {
+    transform: rotateX(-8deg) scaleY(0.98);
+    filter: brightness(0.9);
+  }
+  100% {
+    opacity: 1;
+    transform: rotateX(0deg) scaleY(1);
+    filter: brightness(1);
+  }
+}
+
+@media (max-width: 900px) {
+  :root {
+    --tile-gap: 2px;
+  }
+
+  .board-shell {
+    padding: 8px;
+  }
+
+  .split-board {
+    gap: 6px;
+    padding: 6px;
+  }
+}

@@ -1,0 +1,132 @@
+{
+  "id": "teams-deck",
+  "name": "Teams Deck",
+  "entry": "index.html",
+  "served": true,
+  "hideGridInEditor": true,
+  "options": [
+    {
+      "key": "shortcutProfile",
+      "label": "Shortcuts",
+      "type": "select",
+      "default": "desktop",
+      "choices": [
+        ["desktop", "Desktop app"],
+        ["web", "Website"]
+      ]
+    },
+    {
+      "key": "statusText",
+      "label": "Status text",
+      "type": "text",
+      "default": "Teams status: placeholder"
+    },
+    {
+      "key": "nextMeetingText",
+      "label": "Next meeting",
+      "type": "text",
+      "default": "Next meeting: placeholder"
+    },
+    {
+      "key": "graphToken",
+      "label": "Microsoft Graph token",
+      "type": "secret",
+      "default": "",
+      "help": "Optional. Requires Presence.Read for status/call state and Calendars.Read for next meeting."
+    }
+  ],
+  "grid": {
+    "cols": 9,
+    "rows": 3,
+    "profileOption": "shortcutProfile",
+    "defaults": [
+      { "label": "Teams App", "icon": "🪟", "type": "url", "value": "msteams://" },
+      { "label": "Activity", "icon": "🔔", "type": "key", "value": "ctrl+1", "focusUrl": "msteams://" },
+      { "label": "Chat", "icon": "💬", "type": "key", "value": "ctrl+2", "focusUrl": "msteams://" },
+      { "label": "Teams", "icon": "#️⃣", "type": "key", "value": "ctrl+3", "focusUrl": "msteams://" },
+      { "label": "Calendar", "icon": "📅", "type": "key", "value": "ctrl+4", "focusUrl": "msteams://" },
+      { "label": "Calls", "icon": "📞", "type": "key", "value": "ctrl+5", "focusUrl": "msteams://" },
+      { "label": "Files", "icon": "📁", "type": "key", "value": "ctrl+6", "focusUrl": "msteams://" },
+      { "label": "Search", "icon": "🔎", "type": "key", "value": "ctrl+e", "focusUrl": "msteams://" },
+      { "label": "Shortcuts", "icon": "⌨️", "type": "key", "value": "ctrl+.", "focusUrl": "msteams://" },
+      { "label": "Mute / Unmute", "icon": "🎙️", "type": "key", "value": "ctrl+shift+m", "focusUrl": "msteams://" },
+      { "label": "Camera", "icon": "🎥", "type": "key", "value": "ctrl+shift+o", "focusUrl": "msteams://" },
+      { "label": "Share Screen", "icon": "🖥️", "type": "key", "value": "ctrl+shift+e", "focusUrl": "msteams://" },
+      { "label": "Raise Hand", "icon": "✋", "type": "key", "value": "ctrl+shift+k", "focusUrl": "msteams://" },
+      { "label": "Meeting Chat", "icon": "💬", "type": "key", "value": "ctrl+shift+h", "focusUrl": "msteams://" },
+      { "label": "People", "icon": "👥", "type": "key", "value": "ctrl+shift+u", "focusUrl": "msteams://" },
+      { "label": "Accept Call", "icon": "✅", "type": "key", "value": "ctrl+shift+a", "focusUrl": "msteams://" },
+      { "label": "Decline Call", "icon": "❌", "type": "key", "value": "ctrl+shift+d", "focusUrl": "msteams://" },
+      { "label": "Blur", "icon": "🫥", "type": "key", "value": "ctrl+shift+p", "focusUrl": "msteams://" },
+      { "label": "New Chat", "icon": "✎", "type": "key", "value": "ctrl+n", "focusUrl": "msteams://" },
+      { "label": "Send", "icon": "↵", "type": "key", "value": "ctrl+enter", "focusUrl": "msteams://" },
+      { "label": "New Line", "icon": "↲", "type": "key", "value": "shift+enter", "focusUrl": "msteams://" },
+      { "label": "Expand Compose", "icon": "⤢", "type": "key", "value": "ctrl+shift+x", "focusUrl": "msteams://" },
+      { "label": "Paste", "icon": "⎘", "type": "key", "value": "ctrl+v", "focusUrl": "msteams://" },
+      { "label": "Undo", "icon": "↶", "type": "key", "value": "ctrl+z", "focusUrl": "msteams://" },
+      { "label": "Bold", "icon": "B", "type": "key", "value": "ctrl+b", "focusUrl": "msteams://" },
+      { "label": "Attach File", "icon": "📎", "type": "key", "value": "alt+shift+o", "focusUrl": "msteams://" },
+      { "label": "Insert Link", "icon": "🔗", "type": "key", "value": "ctrl+k", "focusUrl": "msteams://" }
+    ],
+    "profiles": {
+      "desktop": [
+        { "label": "Teams App", "icon": "🪟", "type": "url", "value": "msteams://" },
+        { "label": "Activity", "icon": "🔔", "type": "key", "value": "ctrl+1", "focusUrl": "msteams://" },
+        { "label": "Chat", "icon": "💬", "type": "key", "value": "ctrl+2", "focusUrl": "msteams://" },
+        { "label": "Teams", "icon": "#️⃣", "type": "key", "value": "ctrl+3", "focusUrl": "msteams://" },
+        { "label": "Calendar", "icon": "📅", "type": "key", "value": "ctrl+4", "focusUrl": "msteams://" },
+        { "label": "Calls", "icon": "📞", "type": "key", "value": "ctrl+5", "focusUrl": "msteams://" },
+        { "label": "Files", "icon": "📁", "type": "key", "value": "ctrl+6", "focusUrl": "msteams://" },
+        { "label": "Search", "icon": "🔎", "type": "key", "value": "ctrl+e", "focusUrl": "msteams://" },
+        { "label": "Shortcuts", "icon": "⌨️", "type": "key", "value": "ctrl+.", "focusUrl": "msteams://" },
+        { "label": "Mute / Unmute", "icon": "🎙️", "type": "key", "value": "ctrl+shift+m", "focusUrl": "msteams://" },
+        { "label": "Camera", "icon": "🎥", "type": "key", "value": "ctrl+shift+o", "focusUrl": "msteams://" },
+        { "label": "Share Screen", "icon": "🖥️", "type": "key", "value": "ctrl+shift+e", "focusUrl": "msteams://" },
+        { "label": "Raise Hand", "icon": "✋", "type": "key", "value": "ctrl+shift+k", "focusUrl": "msteams://" },
+        { "label": "Meeting Chat", "icon": "💬", "type": "key", "value": "ctrl+shift+h", "focusUrl": "msteams://" },
+        { "label": "People", "icon": "👥", "type": "key", "value": "ctrl+shift+u", "focusUrl": "msteams://" },
+        { "label": "Accept Call", "icon": "✅", "type": "key", "value": "ctrl+shift+a", "focusUrl": "msteams://" },
+        { "label": "Decline Call", "icon": "❌", "type": "key", "value": "ctrl+shift+d", "focusUrl": "msteams://" },
+        { "label": "Blur", "icon": "🫥", "type": "key", "value": "ctrl+shift+p", "focusUrl": "msteams://" },
+        { "label": "New Chat", "icon": "✎", "type": "key", "value": "ctrl+n", "focusUrl": "msteams://" },
+        { "label": "Send", "icon": "↵", "type": "key", "value": "ctrl+enter", "focusUrl": "msteams://" },
+        { "label": "New Line", "icon": "↲", "type": "key", "value": "shift+enter", "focusUrl": "msteams://" },
+        { "label": "Expand Compose", "icon": "⤢", "type": "key", "value": "ctrl+shift+x", "focusUrl": "msteams://" },
+        { "label": "Paste", "icon": "⎘", "type": "key", "value": "ctrl+v", "focusUrl": "msteams://" },
+        { "label": "Undo", "icon": "↶", "type": "key", "value": "ctrl+z", "focusUrl": "msteams://" },
+        { "label": "Bold", "icon": "B", "type": "key", "value": "ctrl+b", "focusUrl": "msteams://" },
+        { "label": "Attach File", "icon": "📎", "type": "key", "value": "alt+shift+o", "focusUrl": "msteams://" },
+        { "label": "Insert Link", "icon": "🔗", "type": "key", "value": "ctrl+k", "focusUrl": "msteams://" }
+      ],
+      "web": [
+        { "label": "Teams Web", "icon": "🪟", "type": "url", "value": "https://teams.microsoft.com/v2/" },
+        { "label": "Activity", "icon": "🔔", "type": "key", "value": "ctrl+alt+1", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Chat", "icon": "💬", "type": "key", "value": "ctrl+alt+2", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Teams", "icon": "#️⃣", "type": "key", "value": "ctrl+alt+3", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Calendar", "icon": "📅", "type": "key", "value": "ctrl+alt+4", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Calls", "icon": "📞", "type": "key", "value": "ctrl+alt+5", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Files", "icon": "📁", "type": "key", "value": "ctrl+alt+6", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Search", "icon": "🔎", "type": "key", "value": "ctrl+e", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Shortcuts", "icon": "⌨️", "type": "key", "value": "ctrl+.", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Mute / Unmute", "icon": "🎙️", "type": "key", "value": "ctrl+shift+m", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Camera", "icon": "🎥", "type": "key", "value": "ctrl+shift+o", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Share Screen", "icon": "🖥️", "type": "key", "value": "ctrl+shift+e", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Raise Hand", "icon": "✋", "type": "key", "value": "ctrl+shift+k", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Meeting Chat", "icon": "💬", "type": "key", "value": "ctrl+shift+h", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "People", "icon": "👥", "type": "key", "value": "ctrl+shift+u", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Accept Call", "icon": "✅", "type": "key", "value": "ctrl+shift+a", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Decline Call", "icon": "❌", "type": "key", "value": "ctrl+shift+d", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Blur", "icon": "🫥", "type": "key", "value": "ctrl+shift+p", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "New Chat", "icon": "✎", "type": "key", "value": "ctrl+n", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Send", "icon": "↵", "type": "key", "value": "ctrl+enter", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "New Line", "icon": "↲", "type": "key", "value": "shift+enter", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Expand Compose", "icon": "⤢", "type": "key", "value": "ctrl+shift+x", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Paste", "icon": "⎘", "type": "key", "value": "ctrl+v", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Undo", "icon": "↶", "type": "key", "value": "ctrl+z", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Bold", "icon": "B", "type": "key", "value": "ctrl+b", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Attach File", "icon": "📎", "type": "key", "value": "alt+shift+o", "focusUrl": "https://teams.microsoft.com/v2/" },
+        { "label": "Insert Link", "icon": "🔗", "type": "key", "value": "ctrl+k", "focusUrl": "https://teams.microsoft.com/v2/" }
+      ]
+    }
+  }
+}

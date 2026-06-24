@@ -1,0 +1,79 @@
+{
+  "id": "galactic-information-network",
+  "name": "Galactic Information Network",
+  "entry": "index.html",
+  "served": true,
+  "hideGridInEditor": true,
+  "proxy": {
+    "methods": ["GET"],
+    "verifySslOption": "verifySsl",
+    "allow": [
+      {
+        "pattern": "^https?:\\/\\/(?!(?:localhost|127(?:\\.\\d{1,3}){3}|10(?:\\.\\d{1,3}){3}|192\\.168(?:\\.\\d{1,3}){2}|172\\.(?:1[6-9]|2\\d|3[0-1])(?:\\.\\d{1,3}){2}|\\[::1\\]))[^\\s]+$"
+      }
+    ]
+  },
+  "options": [
+    {
+      "key": "mode",
+      "label": "Feed mode",
+      "type": "select",
+      "default": "demo",
+      "choices": [
+        ["demo", "Demo"],
+        ["elite", "Elite only"],
+        ["mixed", "Mixed"],
+        ["custom", "Custom"]
+      ]
+    },
+    {
+      "key": "rotationSeconds",
+      "label": "Rotation seconds",
+      "type": "text",
+      "default": "45"
+    },
+    {
+      "key": "showTicker",
+      "label": "Show ticker",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "showMap",
+      "label": "Show map",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "showTransmissionScreen",
+      "label": "Transmission screen",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "enableAmbientMode",
+      "label": "Ambient fallback",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "maxTickerItems",
+      "label": "Max ticker items",
+      "type": "text",
+      "default": "50"
+    },
+    {
+      "key": "rssFeeds",
+      "label": "RSS feeds JSON",
+      "type": "text",
+      "default": "[\"https://feeds.arstechnica.com/arstechnica/index\",\"https://www.theverge.com/rss/index.xml\",\"https://www.nasa.gov/news-release/feed/\"]",
+      "help": "JSON array of feed URLs or objects with url, name, category, and weight. Used by Mixed and Custom modes."
+    },
+    {
+      "key": "verifySsl",
+      "label": "Verify SSL",
+      "type": "bool",
+      "default": true
+    }
+  ]
+}

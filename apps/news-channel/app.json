@@ -1,0 +1,141 @@
+{
+  "id": "news-channel",
+  "name": "News Channel",
+  "entry": "index.html",
+  "served": true,
+  "hideGridInEditor": true,
+  "proxy": {
+    "methods": ["GET"],
+    "verifySslOption": "verifySsl",
+    "allow": [
+      {
+        "pattern": "^https?:\\/\\/(?!(?:localhost|127(?:\\.\\d{1,3}){3}|10(?:\\.\\d{1,3}){3}|192\\.168(?:\\.\\d{1,3}){2}|172\\.(?:1[6-9]|2\\d|3[0-1])(?:\\.\\d{1,3}){2}|\\[::1\\]))[^\\s]+$"
+      }
+    ]
+  },
+  "options": [
+    {
+      "key": "mode",
+      "label": "Display mode",
+      "type": "select",
+      "default": "live-video",
+      "choices": [
+        ["live-video", "Live Video + Feed"],
+        ["spotlight", "News Spotlight"],
+        ["wall", "News Wall"],
+        ["full-tv", "Full Screen Live TV"]
+      ]
+    },
+    {
+      "key": "theme",
+      "label": "Theme",
+      "type": "select",
+      "default": "open-quake",
+      "choices": [
+        ["open-quake", "Open-Quake"],
+        ["bbc", "BBC style"],
+        ["bloomberg", "Bloomberg style"],
+        ["reuters", "Reuters style"],
+        ["financial", "Financial"]
+      ]
+    },
+    {
+      "key": "liveStream",
+      "label": "Live Stream",
+      "type": "select",
+      "default": "euronews",
+      "choices": [
+        ["euronews", "Euronews Live"],
+        ["dw-news", "DW News Live"],
+        ["france24", "France 24 Live"]
+      ]
+    },
+    {
+      "key": "rssFeeds",
+      "label": "RSS feeds JSON",
+      "type": "text",
+      "default": "[{\"id\":\"bbc\",\"name\":\"BBC News\",\"url\":\"https://feeds.bbci.co.uk/news/rss.xml\",\"category\":\"World\",\"priority\":1,\"enabled\":true,\"maxItems\":18},{\"id\":\"sky\",\"name\":\"Sky News\",\"url\":\"https://feeds.skynews.com/feeds/rss/home.xml\",\"category\":\"Top Stories\",\"priority\":2,\"enabled\":true,\"maxItems\":18},{\"id\":\"verge\",\"name\":\"The Verge\",\"url\":\"https://www.theverge.com/rss/index.xml\",\"category\":\"Technology\",\"priority\":3,\"enabled\":true,\"maxItems\":14},{\"id\":\"nasa\",\"name\":\"NASA\",\"url\":\"https://www.nasa.gov/rss/dyn/breaking_news.rss\",\"category\":\"Science\",\"priority\":4,\"enabled\":true,\"maxItems\":10}]",
+      "help": "JSON array of RSS feed objects. Each feed supports id, name, url, category, priority, enabled, maxItems, weight, and defaultImage."
+    },
+    {
+      "key": "tickerFeeds",
+      "label": "Ticker feeds JSON",
+      "type": "text",
+      "default": "",
+      "help": "Optional JSON array of dedicated ticker feeds. Uses RSS feeds when blank."
+    },
+    {
+      "key": "showTicker",
+      "label": "Show ticker",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "showLiveFeed",
+      "label": "Show live feed",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "showSummary",
+      "label": "Show summary",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "showPublishedTime",
+      "label": "Show published time",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "showSource",
+      "label": "Show source",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "showCategory",
+      "label": "Show category",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "enableBreakingNews",
+      "label": "Breaking detection",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "enableStoryRotation",
+      "label": "Story rotation",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "storyDuration",
+      "label": "Story duration",
+      "type": "select",
+      "default": "15",
+      "choices": [
+        ["10", "10 seconds"],
+        ["15", "15 seconds"],
+        ["20", "20 seconds"],
+        ["30", "30 seconds"],
+        ["60", "60 seconds"]
+      ]
+    },
+    {
+      "key": "refreshIntervalMinutes",
+      "label": "Refresh minutes",
+      "type": "text",
+      "default": "5"
+    },
+    {
+      "key": "verifySsl",
+      "label": "Verify SSL",
+      "type": "bool",
+      "default": true
+    }
+  ]
+}

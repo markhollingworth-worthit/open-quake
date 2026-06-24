@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EDCoPTER Companion</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="app" class="companion waiting" aria-label="EDCoPTER Companion panel">
+    <div class="scanlines" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <div class="brand">
+        <div class="mark" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+        <div>
+          <p>EDCoPTER</p>
+          <h1>Companion</h1>
+        </div>
+      </div>
+
+      <div class="identity">
+        <div class="identity-block">
+          <span>Commander</span>
+          <strong data-field="commander">Waiting</strong>
+        </div>
+        <div class="identity-block">
+          <span>Current Ship</span>
+          <strong data-field="ship">Unassigned</strong>
+        </div>
+      </div>
+
+      <div id="statusBadge" class="status-badge">
+        <i></i>
+        <div>
+          <span>Connection</span>
+          <strong data-field="connection">Initializing</strong>
+        </div>
+      </div>
+    </header>
+
+    <section class="dashboard">
+      <section class="panel flight-panel" aria-label="Flight Status">
+        <div class="section-head">
+          <span>Flight Status</span>
+          <b data-field="flightMode">Standby</b>
+        </div>
+        <div class="flight-grid">
+          <div class="readout wide">
+            <span>Current System</span>
+            <strong data-field="system">--</strong>
+          </div>
+          <div class="readout">
+            <span>Current Body</span>
+            <strong data-field="body">--</strong>
+          </div>
+          <div class="readout">
+            <span>Current Station</span>
+            <strong data-field="station">--</strong>
+          </div>
+          <div class="readout wide">
+            <span>Last Update</span>
+            <strong data-field="lastUpdate">--</strong>
+          </div>
+        </div>
+        <div id="diagnostics" class="diagnostics">Waiting for EDCoPTER telemetry.</div>
+      </section>
+
+      <section class="panel session-panel" aria-label="Session Information">
+        <div class="section-head">
+          <span>Session Information</span>
+          <b data-field="sessionName">No active session</b>
+        </div>
+        <div class="progress-wrap">
+          <div class="progress-meta">
+            <span>Session Progress</span>
+            <strong data-field="progressText">0%</strong>
+          </div>
+          <div class="progress-bar"><i id="progressFill"></i></div>
+        </div>
+        <div class="metrics">
+          <div class="metric">
+            <span>Cargo</span>
+            <strong data-field="cargoCount">0</strong>
+          </div>
+          <div class="metric large">
+            <span>Est. Value</span>
+            <strong data-field="sessionValue">0 CR</strong>
+          </div>
+          <div class="metric">
+            <span>Missions</span>
+            <strong data-field="missions">0</strong>
+          </div>
+          <div class="metric">
+            <span>Bookmarks</span>
+            <strong data-field="bookmarks">0</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel activity-panel" aria-label="Recent Activity">
+        <div class="section-head">
+          <span>Recent Activity</span>
+          <b data-field="eventCount">0 events</b>
+        </div>
+        <div id="activityList" class="activity-list" aria-live="polite"></div>
+      </section>
+    </section>
+
+    <div id="offlineOverlay" class="offline-overlay">
+      <div>
+        <p>Waiting for EDCoPTER</p>
+        <span id="offlineDetails">Connection pending.</span>
+      </div>
+    </div>
+
+    <footer id="ticker" class="ticker" aria-label="Recent activity ticker">
+      <div id="tickerTrack" class="ticker-track"></div>
+    </footer>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

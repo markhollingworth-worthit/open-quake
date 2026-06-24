@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>News Channel</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="app" class="channel theme-open-quake mode-live-video" aria-label="News Channel panel">
+    <section class="broadcast-stage" aria-label="Live broadcast">
+      <div id="videoFrame" class="video-frame">
+        <div id="videoMount" class="video-mount"></div>
+        <div class="video-fallback" id="videoFallback">
+          <div class="signal-lines"></div>
+          <p id="fallbackKicker" class="fallback-kicker">Signal Pending</p>
+          <h1 id="fallbackHeadline">News Channel</h1>
+          <p id="fallbackSummary">Loading live headlines.</p>
+        </div>
+      </div>
+      <div class="broadcast-overlay">
+        <span id="liveBadge" class="live-badge"><span></span>LIVE</span>
+        <span id="sourceBadge" class="source-badge">OPEN-QUAKE NEWS</span>
+        <span id="timeBadge" class="time-badge">--:--</span>
+      </div>
+    </section>
+
+    <aside class="live-rail" aria-label="Live news feed">
+      <div class="rail-head">
+        <span id="railTitle">Live News</span>
+        <span id="updateStatus">Updating</span>
+      </div>
+      <div id="breakingBanner" class="breaking-banner" hidden>Breaking News</div>
+      <div id="feedList" class="feed-list" aria-live="polite"></div>
+    </aside>
+
+    <section class="spotlight-stage" aria-label="News spotlight">
+      <div class="spotlight-image-wrap">
+        <img id="spotlightImageA" class="spotlight-image active" alt="">
+        <img id="spotlightImageB" class="spotlight-image" alt="">
+      </div>
+      <div class="spotlight-copy">
+        <p id="spotlightMeta" class="spotlight-meta">Live News</p>
+        <h1 id="spotlightHeadline">News Channel</h1>
+        <p id="spotlightSummary">Loading the latest stories.</p>
+      </div>
+    </section>
+
+    <section id="wallGrid" class="wall-grid" aria-label="News wall"></section>
+
+    <section id="emptyState" class="empty-state" hidden>
+      <div>
+        <p>News Channel</p>
+        <h1>Standing by for stories</h1>
+        <span id="emptyDetails">Feed refresh pending.</span>
+      </div>
+    </section>
+
+    <footer id="ticker" class="ticker" aria-label="News ticker">
+      <div id="tickerTrack" class="ticker-track">
+        <span>BREAKING</span>
+      </div>
+    </footer>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

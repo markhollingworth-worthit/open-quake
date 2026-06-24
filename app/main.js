@@ -470,6 +470,25 @@ function deviceDisplay() {
     || all.find(d => isPanelSize(d.bounds.width, d.bounds.height))
     || all.find(d => { const s = d.scaleFactor || 1; return isPanelSize(Math.round(d.bounds.width * s), Math.round(d.bounds.height * s)); });
 }
+function deviceStatus() {
+  const d = deviceDisplay();
+  const controlConnected = !!dev.ctrl;
+  const touchConnected = !!dev.touch;
+  const displayPresent = !!d;
+  const b = d && d.bounds;
+  const active = activeGrid();
+  return {
+    connected: controlConnected && displayPresent,
+    controlConnected,
+    touchConnected,
+    displayPresent,
+    monitorMode,
+    label: d && d.label ? d.label : 'DK-QUAKE display',
+    resolution: b ? `${b.width}x${b.height}` : 'not present',
+    activePageId: active && active.id || null,
+    activePageName: active && active.name || 'None'
+  };
+}
 // Snap the panel window to fully cover the DK-QUAKE display's CURRENT bounds. Called on first show and again
 // on every display change (orientation/scale/position resets from OS/driver updates) so the window re-fills
 // instead of sitting inset with the desktop showing around the edges. Logs requested-vs-actual for diagnosis.
@@ -606,7 +625,7 @@ function openConfigWindow() {
   const prim = screen.getPrimaryDisplay().bounds;
   configWin = new BrowserWindow({
     width: 1180, height: 760, x: prim.x + 80, y: prim.y + 60, title: 'open-quake Editor',
-    backgroundColor: '#11151c', webPreferences: { nodeIntegration: true, contextIsolation: false },
+    backgroundColor: '#11151c', webPreferences: { nodeIntegration: true, contextIsolation: false, webviewTag: true },
   });
   configWin.loadFile(path.join(__dirname, 'config.html'));
   configWin.on('closed', () => { configWin = null; });
@@ -672,11 +691,13 @@ function rotationCfg() {
 }
 function pageCategory(g) { return g.kind === 'web' ? 'dashboards' : g.kind === 'app' ? 'apps' : 'grids'; }
 function rotationList() { const c = rotationCfg(); return config.grids.filter(g => g.rotate && c.cats[pageCategory(g)]); }
+function quakeConnected() { return !!dev.ctrl && !!deviceDisplay(); }
 function gotoGrid(id, persist) {
   if (!config.grids.some(g => g.id === id)) return;
   config.activeGridId = id; if (persist) saveConfig(); pushToPanel();
 }
 function rotateTick() {
+  if (!quakeConnected()) return;
   const ids = rotationList().map(g => g.id);
   if (ids.length < 2) return;                                  // nothing to cycle through
   gotoGrid(ids[(ids.indexOf(config.activeGridId) + 1) % ids.length], false);   // active not in list (-1) -> first
@@ -684,19 +705,20 @@ function rotateTick() {
 function scheduleRotation() {
   if (rotTimer) { clearTimeout(rotTimer); rotTimer = null; }
   if (!rotateRunning) return;
+  if (!quakeConnected()) { rotateRunning = false; refreshTray(); pushRotationState(); return; }
   rotTimer = setTimeout(() => { rotateTick(); scheduleRotation(); }, rotationCfg().interval * 1000);
 }
 function pushRotationState() {
   if (panelWin && !panelWin.isDestroyed()) panelWin.webContents.send('rotation', { enabled: rotationCfg().enabled, running: rotateRunning });
 }
-function setRotation(on) { rotateRunning = !!on && rotationCfg().enabled; scheduleRotation(); refreshTray(); pushRotationState(); }
+function setRotation(on) { rotateRunning = !!on && rotationCfg().enabled && quakeConnected(); scheduleRotation(); refreshTray(); pushRotationState(); }
 function toggleRotation() { setRotation(!rotateRunning); }
 // Re-evaluate after a settings change: a fresh off->on starts it, off stops it, on->on keeps the runtime state
 // (so a manual pause survives an unrelated save). interval/page changes are picked up by the (re)schedule.
 function applyRotationSettings(wasEnabled) {
   const enabled = rotationCfg().enabled;
   if (!enabled) rotateRunning = false;
-  else if (!wasEnabled) rotateRunning = true;
+  else if (!wasEnabled) rotateRunning = quakeConnected();
   scheduleRotation(); refreshTray(); pushRotationState();
 }
 
@@ -710,7 +732,14 @@ function trayMenu() {
     { label: micState ? 'Mic: on — click to disable' : 'Mic: off — click to enable', click: () => toggleMic() },
     { label: ringOn ? 'Knob ring: on — click to turn off' : 'Knob ring: off — click to turn on', click: () => toggleKnobRing() },
   ];
-  if (rotationCfg().enabled) items.push({ label: rotateRunning ? 'Auto-rotate: on — click to pause' : 'Auto-rotate: off — click to start', click: () => toggleRotation() });
+  if (rotationCfg().enabled) {
+    const connected = quakeConnected();
+    items.push({
+      label: !connected ? 'Auto-rotate: disabled — device not connected' : rotateRunning ? 'Auto-rotate: on — click to pause' : 'Auto-rotate: off — click to start',
+      enabled: connected,
+      click: () => toggleRotation()
+    });
+  }
   items.push(
     { label: monitorMode ? 'Monitor mode: on — click to return to panel' : 'Switch to monitor mode (use device as a normal monitor)', click: () => toggleMonitorMode() },
     { label: 'Re-place panel on device', enabled: !monitorMode, click: () => { try { dev.screenOn(); } catch (e) {} placePanel(); } },
@@ -802,6 +831,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('getConfig', () => config);
   ipcMain.handle('getApps', () => appsForEditor());
   ipcMain.handle('getVersion', () => app.getVersion());
+  ipcMain.handle('getDeviceStatus', () => deviceStatus());
+  ipcMain.handle('getLivePreviewPage', async () => resolveGridIcons(activeGrid()));
   ipcMain.on('saveConfigFromEditor', (e, newCfg) => {
     const active = config.activeGridId;                          // the knob owns the live page — editor edits never change it
     const wasRot = rotationCfg().enabled;                        // detect a fresh off->on to auto-start (else keep the runtime pause)

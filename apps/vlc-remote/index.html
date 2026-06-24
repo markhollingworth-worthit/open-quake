@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VLC Control Deck</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="deck">
+      <header class="deck-head">
+        <div class="brand-mark">VLC</div>
+        <div class="brand-copy">
+          <h1>VLC Control Deck</h1>
+          <p>Remote control for VLC media player</p>
+        </div>
+      </header>
+
+      <section class="now-card" aria-label="Now playing">
+        <div class="now-row">
+          <div>
+            <span class="eyebrow">Now Playing</span>
+            <strong id="track-title">Nothing loaded</strong>
+          </div>
+          <div class="status-pill" id="status-pill">
+            <span class="dot"></span>
+            <span id="status-text">Offline</span>
+          </div>
+          <div class="deck-clock" id="deck-clock">--:--</div>
+        </div>
+        <div class="progress-console" aria-label="Playback progress">
+          <div class="progress-track"><i id="progress-fill"></i></div>
+          <div class="time-row">
+            <span id="elapsed">0:00</span>
+            <span id="duration">0:00</span>
+          </div>
+        </div>
+        <p id="track-meta">Connecting to local player</p>
+      </section>
+
+      <section class="tile-grid" aria-label="VLC controls">
+        <button class="tile" data-command="pl_previous" title="Previous">
+          <span>|&lt;</span><small>Prev</small>
+        </button>
+        <button class="tile primary" id="play-toggle" data-command="pl_pause" title="Play or pause">
+          <span>&gt;</span><small>Play</small>
+        </button>
+        <button class="tile" data-command="pl_stop" title="Stop">
+          <span>[]</span><small>Stop</small>
+        </button>
+        <button class="tile" data-command="pl_next" title="Next">
+          <span>&gt;|</span><small>Next</small>
+        </button>
+
+        <button class="tile" data-command="seek" data-val="-60" title="Back 60 seconds">
+          <span>-60</span><small>Seek</small>
+        </button>
+        <button class="tile" data-command="seek" data-val="-10" title="Back 10 seconds">
+          <span>-10</span><small>Seek</small>
+        </button>
+        <button class="tile" data-command="seek" data-val="+10" title="Forward 10 seconds">
+          <span>+10</span><small>Seek</small>
+        </button>
+        <button class="tile" data-command="seek" data-val="+60" title="Forward 60 seconds">
+          <span>+60</span><small>Seek</small>
+        </button>
+
+        <button class="tile" data-command="volume" data-val="-16" title="Volume down">
+          <span>-</span><small>Volume</small>
+        </button>
+        <button class="tile" data-command="volume" data-val="0" title="Mute">
+          <span>M</span><small>Mute</small>
+        </button>
+        <div class="tile readout">
+          <span id="volume-label">50%</span><small>Volume</small>
+        </div>
+        <button class="tile" data-command="volume" data-val="+16" title="Volume up">
+          <span>+</span><small>Volume</small>
+        </button>
+
+        <button class="tile wide playlist-tile" id="playlist-open" type="button" title="Playlist">
+          <span>List</span><small>Playlist</small>
+        </button>
+        <button class="tile wide" id="refresh-button" type="button" title="Refresh">
+          <span>Sync</span><small>Refresh</small>
+        </button>
+      </section>
+
+      <section class="preview-panel" id="preview-panel" aria-label="Preview stream" hidden>
+        <video id="video-player" controls playsinline preload="metadata"></video>
+      </section>
+    </section>
+
+    <button class="drawer-tab" id="playlist-tab" type="button" title="Playlist">&gt;</button>
+
+    <aside class="playlist-page" id="playlist-page" aria-label="Playlist" aria-hidden="true">
+      <div class="playlist-head">
+        <h2>Playlist</h2>
+        <button id="playlist-close" type="button" title="Close"><span>Close</span></button>
+      </div>
+      <label class="playlist-search">
+        <span>Search</span>
+        <input id="playlist-search" type="search" autocomplete="off" placeholder="Search playlist...">
+      </label>
+      <div class="playlist" id="playlist"></div>
+      <footer class="playlist-footer">
+        <span id="playlist-summary">0 items</span>
+        <button id="playlist-clear" type="button">Clear Playlist</button>
+      </footer>
+    </aside>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

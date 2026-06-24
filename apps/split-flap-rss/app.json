@@ -1,0 +1,42 @@
+{
+  "id": "split-flap-rss",
+  "name": "Split-Flap RSS Board",
+  "entry": "index.html",
+  "served": true,
+  "server": "server.js",
+  "hideGridInEditor": true,
+  "options": [
+    {
+      "key": "feedsJson",
+      "label": "RSS feeds JSON",
+      "type": "text",
+      "default": "[{\"id\":\"hn\",\"name\":\"HN\",\"url\":\"https://hnrss.org/frontpage\",\"category\":\"DEV\",\"enabled\":true,\"maxItems\":10},{\"id\":\"github\",\"name\":\"GitHub\",\"url\":\"https://github.blog/feed/\",\"category\":\"REL\",\"enabled\":true,\"maxItems\":10},{\"id\":\"openai\",\"name\":\"OpenAI\",\"url\":\"https://openai.com/news/rss.xml\",\"category\":\"AI\",\"enabled\":true,\"maxItems\":10}]",
+      "serverOnly": true,
+      "help": "JSON array of feeds. Each feed supports id, name, url, category, enabled, and maxItems."
+    },
+    {
+      "key": "rows",
+      "label": "Rows",
+      "type": "text",
+      "default": "6"
+    },
+    {
+      "key": "columns",
+      "label": "Columns",
+      "type": "text",
+      "default": "64"
+    },
+    {
+      "key": "refreshSeconds",
+      "label": "Refresh seconds",
+      "type": "text",
+      "default": "300"
+    },
+    {
+      "key": "rotateSeconds",
+      "label": "Rotate seconds",
+      "type": "text",
+      "default": "15"
+    }
+  ]
+}

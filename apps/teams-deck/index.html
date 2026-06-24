@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Teams Deck</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="deck">
+    <header class="top">
+      <div class="brand">
+        <div class="teams-mark">T</div>
+        <div>
+          <h1>OPEN-QUAKE TEAMS DECK</h1>
+          <div class="subtitle">Microsoft Teams shortcuts</div>
+        </div>
+      </div>
+      <section class="status" aria-label="Teams status">
+        <div class="status-item"><span class="status-label">Status</span><span class="status-line"><span class="dot"></span><span id="statusText">Teams status: placeholder</span></span></div>
+        <div class="status-item"><span class="status-label">Next meeting</span><span class="status-line"><span class="status-icon">▣</span><span id="nextMeetingText">Next meeting: placeholder</span></span></div>
+        <div class="status-time"><span class="clock-icon">◷</span><span id="timeText">--:--</span></div>
+      </section>
+    </header>
+    <div class="panel-bar">
+      <span id="panelTitle">Home</span>
+    </div>
+    <section class="tile-grid" id="panelStage" aria-label="Teams shortcut tiles"></section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

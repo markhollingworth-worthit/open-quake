@@ -1,0 +1,61 @@
+{
+  "id": "edcopter-companion",
+  "name": "EDCoPTER Companion",
+  "entry": "index.html",
+  "served": true,
+  "server": "server.js",
+  "hideGridInEditor": true,
+  "proxy": {
+    "methods": ["GET"],
+    "verifySslOption": "verifySsl",
+    "allow": [
+      { "option": "serverUrl" }
+    ]
+  },
+  "options": [
+    {
+      "key": "serverUrl",
+      "label": "EDCoPTER Server URL",
+      "type": "text",
+      "default": "http://192.168.1.100:4600",
+      "help": "Base EDCoPTER URL, including protocol and port."
+    },
+    {
+      "key": "autoConnect",
+      "label": "Auto Connect",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "reconnect",
+      "label": "Reconnect Automatically",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "showStatus",
+      "label": "Connection Status Indicator",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "showTicker",
+      "label": "Footer Ticker",
+      "type": "bool",
+      "default": true
+    },
+    {
+      "key": "demoMode",
+      "label": "Demo Mode",
+      "type": "bool",
+      "default": false,
+      "help": "Run a polished simulated EDCoPTER feed without connecting to a server."
+    },
+    {
+      "key": "verifySsl",
+      "label": "Verify SSL",
+      "type": "bool",
+      "default": true
+    }
+  ]
+}

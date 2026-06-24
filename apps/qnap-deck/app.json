@@ -1,0 +1,58 @@
+{
+  "id": "qnap",
+  "name": "QNAP NAS",
+  "entry": "index.html",
+  "served": true,
+  "server": "server.js",
+  "proxy": {
+    "methods": ["GET"],
+    "verifySslOption": "verifySsl",
+    "allow": [
+      { "option": "host" }
+    ]
+  },
+  "options": [
+    {
+      "key": "host",
+      "label": "QNAP URL",
+      "type": "text",
+      "default": "https://192.168.0.1:443",
+      "serverOnly": true,
+      "help": "Use the NAS QTS URL, including http:// or https:// and the port if needed."
+    },
+    {
+      "key": "username",
+      "label": "Username",
+      "type": "text",
+      "default": "",
+      "serverOnly": true
+    },
+    {
+      "key": "password",
+      "label": "Password",
+      "type": "secret",
+      "default": "",
+      "serverOnly": true
+    },
+    {
+      "key": "verifySsl",
+      "label": "Verify SSL",
+      "type": "bool",
+      "default": false,
+      "serverOnly": true,
+      "help": "Turn this off for a NAS using a self-signed certificate."
+    },
+    {
+      "key": "refreshSeconds",
+      "label": "Refresh seconds",
+      "type": "text",
+      "default": "30"
+    },
+    {
+      "key": "mock",
+      "label": "Demo data",
+      "type": "bool",
+      "default": false
+    }
+  ]
+}
