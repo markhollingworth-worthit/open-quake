@@ -57,6 +57,7 @@ let server = null, onMedia = null, onLaunch = null, getMusicTiles = null, getApp
 let sysHtml = FALLBACK, musicHtml = FALLBACK, chatHtml = FALLBACK, hascheduleHtml = FALLBACK;
 const staticAssets = {};   // request path -> { body, type }; populated at start()
 let appFolders = {};        // drop-in served app id -> { root, proxy }; supplied by main.js
+const appServers = {};      // app id -> required server module
 
 function headers(type) { return { 'Content-Type': type, 'Cache-Control': 'no-store', 'Content-Security-Policy': LOCAL_APP_CSP }; }
 function html(res, body) { res.writeHead(200, headers('text/html; charset=utf-8')); res.end(body); }
@@ -64,6 +65,7 @@ function json(res, obj) { res.writeHead(200, headers('application/json; charset=
 function done(res, ok) { res.writeHead(ok ? 200 : 400, headers('application/json')); res.end(JSON.stringify({ ok: !!ok })); }
 function setAppFolders(folders) {
   appFolders = {};
+  Object.keys(appServers).forEach(id => { if (!folders || !folders[id]) delete appServers[id]; });
   Object.entries(folders || {}).forEach(([id, value]) => {
     appFolders[id] = typeof value === 'string' ? { root: value, proxy: null } : Object.assign({}, value || {});
   });
@@ -128,6 +130,11 @@ function queryValue(full, key) {
   try { return new URL(full, 'http://127.0.0.1').searchParams.get(key) || ''; }
   catch (e) { return ''; }
 }
+function queryObject(full) {
+  const out = {};
+  try { new URL(full, 'http://127.0.0.1').searchParams.forEach((value, key) => { out[key] = value; }); } catch (e) {}
+  return out;
+}
 function privateHost(hostname) {
   const h = String(hostname || '').toLowerCase();
   if (h === 'localhost' || h === '0.0.0.0' || h === '::1' || h.endsWith('.local')) return true;
@@ -142,10 +149,24 @@ function proxyAllowed(appId, targetUrl) {
   if (proxy.methods && Array.isArray(proxy.methods) && !proxy.methods.includes('GET')) return false;
   let target;
   try { target = new URL(targetUrl); } catch (e) { return false; }
-  if ((target.protocol !== 'http:' && target.protocol !== 'https:') || privateHost(target.hostname)) return false;
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') return false;
   const allow = Array.isArray(proxy.allow) ? proxy.allow : [];
   if (!allow.length) return false;
   return allow.some(rule => {
+    if (rule.option) {
+      let cfg;
+      try { cfg = getAppConfig && getAppConfig(appId); } catch (e) {}
+      const baseValue = cfg && cfg.options && cfg.options[rule.option];
+      if (!baseValue) return false;
+      try {
+        const base = new URL(String(baseValue).replace(/\/+$/, '') + '/');
+        const basePath = base.pathname === '/' ? '/' : base.pathname.replace(/\/+$/, '/') ;
+        return target.origin === base.origin && (basePath === '/' || target.pathname === basePath.slice(0, -1) || target.pathname.startsWith(basePath));
+      } catch (e) {
+        return false;
+      }
+    }
+    if (privateHost(target.hostname)) return false;
     try { return new RegExp(rule.pattern).test(target.href); }
     catch (e) { return false; }
   });
@@ -203,10 +224,48 @@ function serveAppProxy(req, res, full) {
     res.end(result.body);
   });
 }
-function serveAppApi(req, res, full, url) {
+function appOptions(appId) {
+  try {
+    const cfg = getAppConfig && getAppConfig(appId);
+    return cfg && cfg.options || {};
+  } catch (e) {
+    return {};
+  }
+}
+function appServer(appId) {
+  const appInfo = appFolders[appId];
+  if (!appInfo || !appInfo.server) return null;
+  if (appServers[appId]) return appServers[appId];
+  const root = path.resolve(appInfo.root);
+  const serverFile = path.resolve(appInfo.server);
+  if (serverFile !== root && !serverFile.startsWith(root + path.sep)) return null;
+  try {
+    appServers[appId] = require(serverFile);
+    return appServers[appId];
+  } catch (e) {
+    console.log('app server load error:', appId, '-', e.message);
+    return null;
+  }
+}
+async function serveAppApi(req, res, full, url) {
   const appId = requestingAppId(req);
   const action = url.slice('/app-api/'.length);
-  if (!appId || action !== 'open') { return done(res, false); }
+  if (!appId || !action) { return done(res, false); }
+  const mod = appServer(appId);
+  if (mod && typeof mod.handle === 'function') {
+    try {
+      const result = await mod.handle(action, { appId, query: queryObject(full), options: appOptions(appId) });
+      const status = result && result.ok === false && result.error === 'unknown action' ? 400 : 200;
+      res.writeHead(status, headers('application/json; charset=utf-8'));
+      res.end(JSON.stringify(result == null ? { ok: true } : result));
+      return;
+    } catch (e) {
+      res.writeHead(500, headers('application/json; charset=utf-8'));
+      res.end(JSON.stringify({ ok: false, error: e.message || 'app server failed' }));
+      return;
+    }
+  }
+  if (action !== 'open') { return done(res, false); }
   const target = queryValue(full, 'url');
   let ok = false;
   try {
@@ -257,6 +316,11 @@ async function handler(req, res) {
   if (url === '/app-config') {
     const m = /[?&]app=([A-Za-z0-9_-]+)/.exec(full);
     const cfg = (m && getAppConfig) ? getAppConfig(m[1]) : null;
+    return cfg ? json(res, cfg) : done(res, false);
+  }
+  if (url === '/app-proxy/config') {
+    const appId = requestingAppId(req);
+    const cfg = appId && getAppConfig ? getAppConfig(appId) : null;
     return cfg ? json(res, cfg) : done(res, false);
   }
   if (url === '/app-proxy') return serveAppProxy(req, res, full);

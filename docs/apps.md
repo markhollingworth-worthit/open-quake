@@ -70,6 +70,29 @@ in the editor to reload manifests.
   that need same-origin `fetch`, browser APIs that require HTTP, or multiple
   static assets served through the same origin.
 
+Served drop-in apps can also declare host-side helpers:
+
+```json
+{
+  "server": "server.js",
+  "proxy": {
+    "methods": ["GET"],
+    "verifySslOption": "verifySsl",
+    "allow": [{ "option": "host" }]
+  }
+}
+```
+
+- `server` loads a local Node module from the app folder. It should export
+  `handle(action, context)`. The page calls it with `/app-api/<action>`.
+- `context.options` contains the active app options, including options marked
+  `"serverOnly": true` and secret options.
+- `"serverOnly": true` keeps an option out of the page URL while still making it
+  available to the server adapter and `/app-proxy/config`.
+- `/app-proxy?url=...` is available only to the requesting app page and only for
+  URLs allowed by the app manifest. `{ "option": "host" }` allows requests to the
+  configured host origin, including LAN devices.
+
 See `docs/app-template/` for a minimal starting point.
 
 ## Legacy bundled apps

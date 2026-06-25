@@ -251,11 +251,13 @@ function appCatalog() {
       warnAppManifest('dup:' + id, 'skipping duplicate app id: ' + id);
       return;
     }
+    const serverEntry = safeAppEntry(manifest.server);
     const def = Object.assign({}, manifest, {
       id,
       name: manifest.name || id,
       file: entry,
       entry,
+      server: serverEntry || undefined,
       served: !!manifest.served,
       options: Array.isArray(manifest.options) ? manifest.options : [],
       _folder: true,
@@ -263,7 +265,7 @@ function appCatalog() {
     });
     apps.push(def);
     ids.add(id);
-    if (def.served) servedApps[id] = { root: appDir, proxy: manifest.proxy || null };
+    if (def.served) servedApps[id] = { root: appDir, proxy: manifest.proxy || null, server: serverEntry ? path.join(appDir, serverEntry) : null };
   });
   return { apps, servedApps };
 }
@@ -296,13 +298,13 @@ function appPageUrl(page) {
   if (!def) return 'about:blank';
   if (def.served) {                                                          // served by the local server (live data, same-origin fetch, grid launch)
     const opts = page.options || {};                                         // non-secret options only; secrets are served by /app-config
-    const qs = [appOptionQuery(def, opts, o => o.type !== 'secret'), themeParams(page)].filter(Boolean).join('&');
+    const qs = [appOptionQuery(def, opts, o => o.type !== 'secret' && !o.serverOnly), themeParams(page)].filter(Boolean).join('&');
     if (def._folder) return 'http://127.0.0.1:' + serverPort + '/apps/' + encodeURIComponent(def.id) + '/' + appEntryUrlPath(def.entry || def.file) + (qs ? '?' + qs : '');
     return 'http://127.0.0.1:' + serverPort + '/' + def.id + (qs ? '?' + qs : '');
   }
   const file = def._folder ? path.join(def._dir, def.entry || def.file) : path.join(APPS_DIR, def.file);
   const opts = page.options || {};
-  const hash = [appOptionQuery(def, opts, o => o.type !== 'secret'), themeParams(page)].filter(Boolean).join('&');
+  const hash = [appOptionQuery(def, opts, o => o.type !== 'secret' && !o.serverOnly), themeParams(page)].filter(Boolean).join('&');
   return pathToFileURL(file).href + (hash ? '#' + hash : '');
 }
 function activeServedAppConfig(appId) {
