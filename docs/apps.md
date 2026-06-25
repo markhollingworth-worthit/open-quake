@@ -77,7 +77,9 @@ The editor's **Settings → Drop-In Apps** tab manages app folders for you:
 - **Delete** — remove an app's folder.
 - **Refresh** — re-scan for changes (import and delete refresh automatically).
 - **Community apps ↗** — opens the
-  [community-apps](https://github.com/TeeJS/open-quake/tree/main/community-apps) folder.
+  [community-apps](https://github.com/TeeJS/open-quake/tree/main/community-apps) download
+  folder, where you can grab an app's `.zip` and import it. See
+  [Community apps](community-apps.md) for installing and submitting.
 
 **Storage location** (Advanced) — drop-in apps live in **`%APPDATA%\open-quake\apps`** by default
 (switchable to `%LOCALAPPDATA%\open-quake\apps`). This is the **only** place open-quake looks for
