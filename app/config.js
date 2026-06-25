@@ -938,6 +938,23 @@
         <p class="hint">Specified in apps.json.</p>
         ${devEnabled() ? devApps.map(a => appRow(a, devShown(a.id))).join('') : ''}` : ''}`;
 
+    // Drop-In Apps tab — manage user-installed app folders (import/export/delete) + storage location
+    const diHtml = `
+      <p class="sectitle">Drop-In Apps</p>
+      <p class="hint">Self-contained app folders you add yourself — import a .zip, export one to share, or delete it. Bundled / built-in apps aren't listed here.</p>
+      <div class="row" style="gap:8px"><button id="diAdd">Add (import .zip)…</button><button id="diRefresh">Refresh</button><button id="diCommunity" style="margin-left:auto">Community apps ↗</button></div>
+      <div id="diMsg" class="hint" style="margin:6px 0;min-height:18px"></div>
+      <div id="diList"><p class="hint">Loading…</p></div>
+      <details class="advsec" style="margin-top:16px"><summary style="cursor:pointer;color:#9fb3c8;font-size:13px;user-select:none">Advanced settings</summary>
+        <div class="row" style="margin-top:8px"><label style="width:auto">Storage location</label>
+          <select id="diLoc" style="width:auto">
+            <option value="appdata">%APPDATA%\\open-quake</option>
+            <option value="localappdata">%LOCALAPPDATA%\\open-quake</option>
+          </select></div>
+        <p class="hint" id="diLocPath" style="margin:2px 0 0"></p>
+        <p class="hint">Where imported drop-in apps are stored — this folder survives app updates (the install folder doesn't).</p>
+      </details>`;
+
     el.innerHTML = `
       <p class="sectitle">Settings</p>
       <div class="tabbar">
@@ -945,15 +962,17 @@
         <button id="tabHw" class="tab${tab === 'hardware' ? ' on' : ''}">Hardware</button>
         <button id="tabTh" class="tab${tab === 'theme' ? ' on' : ''}">Theme</button>
         <button id="tabApps" class="tab${tab === 'apps' ? ' on' : ''}">Apps</button>
+        <button id="tabDi" class="tab${tab === 'dropin' ? ' on' : ''}">Drop-In Apps</button>
         <button id="tabMon" class="tab${tab === 'monitor' ? ' on' : ''}">Monitor</button>
       </div>
-      ${tab === 'software' ? swHtml : tab === 'hardware' ? hwHtml : tab === 'theme' ? thHtml : tab === 'apps' ? appsHtml : monHtml}
+      ${tab === 'software' ? swHtml : tab === 'hardware' ? hwHtml : tab === 'theme' ? thHtml : tab === 'apps' ? appsHtml : tab === 'dropin' ? diHtml : monHtml}
       <div class="row" style="margin-top:22px"><button id="sBack">← Back to pages</button></div>`;
 
     document.getElementById('tabSw').onclick = () => { settingsTab = 'software'; renderSettings(); };
     document.getElementById('tabHw').onclick = () => { settingsTab = 'hardware'; renderSettings(); };
     document.getElementById('tabTh').onclick = () => { settingsTab = 'theme'; renderSettings(); };
     document.getElementById('tabApps').onclick = () => { settingsTab = 'apps'; renderSettings(); };
+    document.getElementById('tabDi').onclick = () => { settingsTab = 'dropin'; renderSettings(); };
     document.getElementById('tabMon').onclick = () => { settingsTab = 'monitor'; renderSettings(); };
     document.getElementById('sBack').onclick = () => { view = 'pages'; render(); };
     const setS = (k, v) => { if (!config.settings) config.settings = {}; config.settings[k] = v; markDirty(); };
@@ -975,6 +994,60 @@
       });
       const dm = document.getElementById('devMaster');   // master: just reveals the developer-app list in this tab
       if (dm) dm.onchange = e => { if (!config.settings) config.settings = {}; config.settings.devApps = e.target.checked; markDirty(); renderSettings(); };
+    }
+
+    if (tab === 'dropin') {
+      let importZipPath = null;   // held across an id-conflict rename retry
+      const diMsg = (t, bad) => { const m = document.getElementById('diMsg'); if (m) { m.textContent = t || ''; m.style.color = bad ? '#c98' : '#7e93ab'; } };
+      const renderList = async () => {
+        const host = document.getElementById('diList'); if (!host) return;
+        let apps = []; try { apps = (await configApi.listDropInApps()) || []; } catch (e) {}
+        if (!apps.length) { host.innerHTML = '<p class="hint">No drop-in apps installed yet.</p>'; return; }
+        host.innerHTML = apps.map(a => `<div class="row" style="gap:8px;align-items:center">
+            <span style="flex:1">${esc(a.name)} <span class="hint">(${esc(a.id)}${a.served ? ' · served' : ''}${a.hasServer ? ' · server' : ''}${a.managed ? '' : ' · read-only'})</span></span>
+            <button class="diExport" data-id="${esc(a.id)}">Export…</button>
+            <button class="diDelete danger" data-id="${esc(a.id)}" ${a.managed ? '' : 'disabled'}>Delete</button>
+          </div>`).join('');
+        host.querySelectorAll('.diExport').forEach(b => b.onclick = async e => { const r = await configApi.exportDropInApp(e.currentTarget.dataset.id); diMsg(r && r.ok ? 'Exported to ' + r.path : (r && r.canceled ? '' : 'Export failed: ' + ((r && r.error) || '')), !(r && r.ok)); });
+        host.querySelectorAll('.diDelete').forEach(b => b.onclick = async e => {
+          const id = e.currentTarget.dataset.id;
+          if (!window.confirm('Delete drop-in app "' + id + '" and its folder?')) return;
+          const r = await configApi.deleteDropInApp(id);
+          if (r && r.ok) { diMsg('Deleted ' + id); appDefs = await configApi.getApps(); renderList(); } else diMsg('Delete failed: ' + ((r && r.error) || ''), true);
+        });
+      };
+      const promptId = (suggested) => new Promise(resolve => {
+        const m = document.getElementById('diMsg'); m.style.color = '#c98';
+        m.innerHTML = 'App id "' + esc(suggested) + '" already exists — pick a new id: <input id="diNewId" value="' + esc(suggested) + '" style="width:150px"> <button id="diNewOk">Import</button> <button id="diNewCancel">Cancel</button>';
+        const inp = document.getElementById('diNewId'); inp.focus(); inp.select();
+        const fin = v => { m.innerHTML = ''; m.style.color = ''; resolve(v); };
+        document.getElementById('diNewOk').onclick = () => fin((inp.value || '').trim() || null);
+        document.getElementById('diNewCancel').onclick = () => fin(null);
+        inp.onkeydown = ev => { if (ev.key === 'Enter') document.getElementById('diNewOk').click(); else if (ev.key === 'Escape') fin(null); };
+      });
+      const doImport = async (forceId, confirmExec) => {
+        if (!importZipPath) importZipPath = await configApi.pickZip();
+        if (!importZipPath) return;
+        const r = await configApi.importDropInApp(importZipPath, forceId, confirmExec);
+        if (r && r.ok) { importZipPath = null; appDefs = await configApi.getApps(); renderList(); diMsg('Imported "' + r.name + '" (' + r.id + ')'); }
+        else if (r && r.warnExec && !confirmExec) {
+          if (window.confirm('This drop-in app contains executable code' + (r.server ? ' (a server module)' : ' (programs/scripts)') + ' that runs on your PC with full access. Only import it if you trust the source.\n\nImport anyway?')) doImport(forceId, true);
+          else importZipPath = null;
+        }
+        else if (r && r.conflict) { const newId = await promptId(r.id); if (newId) doImport(newId, confirmExec); else importZipPath = null; }
+        else { importZipPath = null; diMsg('Import failed: ' + ((r && r.error) || 'unknown error'), true); }
+      };
+      document.getElementById('diAdd').onclick = () => { importZipPath = null; doImport(); };
+      document.getElementById('diRefresh').onclick = () => renderList();
+      document.getElementById('diCommunity').onclick = () => configApi.openExternal('https://github.com/TeeJS/open-quake/tree/main/community-apps');
+      configApi.getDropInInfo().then(info => { if (!info) return; const s2 = document.getElementById('diLoc'); if (s2) s2.value = info.location; const p = document.getElementById('diLocPath'); if (p) p.textContent = info.dir; });
+      document.getElementById('diLoc').onchange = async e => {
+        const info = await configApi.setDropInLocation(e.target.value);
+        if (!config.settings) config.settings = {}; config.settings.dropInLocation = e.target.value;   // keep the editor copy in sync so a full Save won't revert it
+        const p = document.getElementById('diLocPath'); if (info && p) p.textContent = info.dir;
+        renderList();
+      };
+      renderList();
     }
 
     if (tab === 'software') {

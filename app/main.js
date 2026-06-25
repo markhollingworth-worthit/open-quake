@@ -233,52 +233,142 @@ function readFolderAppManifest(appDir) {
   }
   return null;
 }
-function appCatalog() {
-  const apps = readLegacyApps();
-  const ids = new Set(apps.map(a => a && a.id).filter(Boolean));
-  const servedApps = {};
+// User-data drop-in apps folder (survives app updates, unlike the install dir). Location is a setting:
+// %APPDATA%\open-quake\apps (default) or %LOCALAPPDATA%\open-quake\apps. This is where the manager imports to.
+function dropInDir() {
+  const useLocal = (config.settings && config.settings.dropInLocation) === 'localappdata';
+  const base = (useLocal ? process.env.LOCALAPPDATA : process.env.APPDATA) || process.env.APPDATA || process.env.LOCALAPPDATA || USER_DIR;
+  return path.join(base, 'open-quake', 'apps');
+}
+function ensureDropInDir() { const d = dropInDir(); try { fs.mkdirSync(d, { recursive: true }); } catch (e) {} return d; }
+// Scan one base dir for drop-in app folders, adding valid ones to apps/ids/servedApps (dedup by id, first wins).
+function scanAppDir(baseDir, apps, ids, servedApps) {
   let entries = [];
-  try { entries = fs.readdirSync(APPS_DIR, { withFileTypes: true }); }
-  catch (e) { return { apps, servedApps }; }
+  try { entries = fs.readdirSync(baseDir, { withFileTypes: true }); } catch (e) { return; }
   entries.filter(d => d.isDirectory()).forEach(d => {
-    const appDir = path.join(APPS_DIR, d.name);
+    const appDir = path.join(baseDir, d.name);
     const manifest = readFolderAppManifest(appDir);
     if (!manifest) return;
     const id = typeof manifest.id === 'string' ? manifest.id.trim() : '';
-    if (!SAFE_APP_ID.test(id)) {
-      warnAppManifest('id:' + appDir, 'skipping app folder with invalid id: ' + appDir);
-      return;
-    }
+    if (!SAFE_APP_ID.test(id)) { warnAppManifest('id:' + appDir, 'skipping app folder with invalid id: ' + appDir); return; }
     const entry = safeAppEntry(manifest.entry || manifest.file);
-    if (!entry) {
-      warnAppManifest('entry:' + appDir, 'skipping app folder with invalid entry: ' + id);
-      return;
-    }
-    if (ids.has(id)) {
-      warnAppManifest('dup:' + id, 'skipping duplicate app id: ' + id);
-      return;
-    }
+    if (!entry) { warnAppManifest('entry:' + appDir, 'skipping app folder with invalid entry: ' + id); return; }
+    if (ids.has(id)) { warnAppManifest('dup:' + id, 'skipping duplicate app id: ' + id); return; }
     const serverEntry = safeAppEntry(manifest.server);
     const def = Object.assign({}, manifest, {
-      id,
-      name: manifest.name || id,
-      file: entry,
-      entry,
-      server: serverEntry || undefined,
-      served: !!manifest.served,
-      options: Array.isArray(manifest.options) ? manifest.options : [],
-      _folder: true,
-      _dir: appDir,
+      id, name: manifest.name || id, file: entry, entry, server: serverEntry || undefined,
+      served: !!manifest.served, options: Array.isArray(manifest.options) ? manifest.options : [],
+      _folder: true, _dir: appDir,
     });
     apps.push(def);
     ids.add(id);
     if (def.served) servedApps[id] = { root: appDir, proxy: manifest.proxy || null, server: serverEntry ? path.join(appDir, serverEntry) : null };
   });
+}
+function appCatalog() {
+  const apps = readLegacyApps();
+  const ids = new Set(apps.map(a => a && a.id).filter(Boolean));
+  const servedApps = {};
+  // Drop-in apps live ONLY in the user-data folder (%APPDATA%/%LOCALAPPDATA%) so they survive
+  // app updates — we deliberately do NOT scan the bundled install dir for drop-in folders.
+  scanAppDir(dropInDir(), apps, ids, servedApps);
   return { apps, servedApps };
 }
-// Bundled local apps (apps/apps.json) plus drop-in app folders under apps/<id>/.
+// Bundled local apps (apps/apps.json) plus drop-in app folders (user-data dir only).
 function loadApps() { return appCatalog().apps; }
 function discoveredServedApps() { return appCatalog().servedApps; }
+
+// ---- drop-in app manager (Settings → Drop-In Apps): list / import (zip) / export (zip) / delete ----
+// Zip via Windows' built-in Expand-Archive / Compress-Archive (no extra dependency). Windows-only.
+function psQuote(s) { return "'" + String(s).replace(/'/g, "''") + "'"; }
+function runPwsh(cmd) {
+  return new Promise(resolve => execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', cmd], { windowsHide: true, timeout: 60000 }, err => resolve(!err)));
+}
+function manifestPath(dir) { for (const n of ['app.json', 'manifest.json']) { const p = path.join(dir, n); try { if (fs.existsSync(p)) return p; } catch (e) {} } return null; }
+// Find the app root in an extracted zip: the dir itself, or a single subdir, that holds a manifest.
+function findAppRoot(dir) {
+  if (manifestPath(dir)) return dir;
+  let subs = [];
+  try { subs = fs.readdirSync(dir, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => path.join(dir, d.name)); } catch (e) {}
+  for (const s of subs) if (manifestPath(s)) return s;
+  return null;
+}
+function copyDirSync(src, dest) {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const d of fs.readdirSync(src, { withFileTypes: true })) {
+    const s = path.join(src, d.name), t = path.join(dest, d.name);
+    if (d.isDirectory()) copyDirSync(s, t); else fs.copyFileSync(s, t);
+  }
+}
+function listDropInApps() {
+  const base = path.resolve(dropInDir());
+  return appCatalog().apps.filter(a => a._folder).map(a => ({
+    id: a.id, name: a.name, served: !!a.served, hasServer: !!a.server,
+    managed: !!(a._dir && path.resolve(a._dir).startsWith(base)),   // only user-data apps can be deleted/exported
+  }));
+}
+function folderAppDir(id) { const def = appCatalog().apps.find(a => a._folder && a.id === id); return def ? def._dir : null; }
+// Import a .zip. On an app-id conflict, return { conflict, id } so the editor can prompt for a new id and retry with forceId.
+// Risky bundled files that execute on the host (a drop-in app's `server` Node module is checked separately).
+// Client-side .js runs sandboxed in the webview, so it's NOT flagged here.
+const RISKY_EXT = new Set(['.exe', '.dll', '.com', '.scr', '.msi', '.bat', '.cmd', '.ps1', '.psm1', '.vbs', '.vbe', '.wsf', '.wsh', '.jar', '.sh', '.cpl']);
+function folderHasExecutable(dir) {
+  let found = false;
+  (function walk(d) {
+    let ents = []; try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch (e) { return; }
+    for (const ent of ents) {
+      if (found) return;
+      if (ent.isDirectory()) walk(path.join(d, ent.name));
+      else if (RISKY_EXT.has(path.extname(ent.name).toLowerCase())) found = true;
+    }
+  })(dir);
+  return found;
+}
+async function importDropInApp(zipPath, forceId, confirmExec) {
+  if (typeof zipPath !== 'string' || !fs.existsSync(zipPath)) return { ok: false, error: 'file not found' };
+  const tmp = path.join(USER_DIR, 'import-tmp-' + Date.now());
+  try {
+    fs.mkdirSync(tmp, { recursive: true });
+    if (!await runPwsh(`Expand-Archive -LiteralPath ${psQuote(zipPath)} -DestinationPath ${psQuote(tmp)} -Force`)) return { ok: false, error: 'could not unzip' };
+    const appRoot = findAppRoot(tmp);
+    if (!appRoot) return { ok: false, error: 'no app.json / manifest.json found in the zip' };
+    const mp = manifestPath(appRoot);
+    let manifest; try { manifest = JSON.parse(fs.readFileSync(mp, 'utf8')); } catch (e) { return { ok: false, error: 'the manifest is not valid JSON' }; }
+    const id0 = (manifest && typeof manifest.id === 'string') ? manifest.id.trim() : '';
+    // #8: warn before installing anything that runs host code (a server module or bundled binaries/scripts).
+    if (!confirmExec && (safeAppEntry(manifest.server) || folderHasExecutable(appRoot))) {
+      return { ok: false, warnExec: true, id: id0, server: !!safeAppEntry(manifest.server) };
+    }
+    const finalId = ((forceId || id0) || '').trim();
+    if (!SAFE_APP_ID.test(finalId)) return { ok: false, error: 'invalid app id (use lowercase letters, digits, _ or -)' };
+    const taken = new Set(appCatalog().apps.map(a => a.id));
+    const destDir = path.join(dropInDir(), finalId);
+    if (taken.has(finalId) || fs.existsSync(destDir)) {
+      return forceId ? { ok: false, error: 'the id "' + finalId + '" is also taken' } : { ok: false, conflict: true, id: id0 || finalId };
+    }
+    if (finalId !== id0) { manifest.id = finalId; try { fs.writeFileSync(mp, JSON.stringify(manifest, null, 2)); } catch (e) { return { ok: false, error: 'could not rewrite the manifest id' }; } }
+    ensureDropInDir();
+    try { fs.renameSync(appRoot, destDir); } catch (e) { copyDirSync(appRoot, destDir); }
+    return { ok: true, id: finalId, name: manifest.name || finalId };
+  } catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+  finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {} }
+}
+async function exportDropInApp(id) {
+  const dir = folderAppDir(id);
+  if (!dir || !fs.existsSync(dir)) return { ok: false, error: 'app not found' };
+  const r = await dialog.showSaveDialog(configWin, { defaultPath: id + '.zip', filters: [{ name: 'Zip', extensions: ['zip'] }] });
+  if (r.canceled || !r.filePath) return { ok: false, canceled: true };
+  const ok = await runPwsh(`Compress-Archive -Path ${psQuote(dir)} -DestinationPath ${psQuote(r.filePath)} -Force`);
+  return ok ? { ok: true, path: r.filePath } : { ok: false, error: 'could not create the zip' };
+}
+function deleteDropInApp(id) {
+  const dir = folderAppDir(id);
+  if (!dir) return { ok: false, error: 'app not found' };
+  const base = path.resolve(dropInDir());
+  if (!path.resolve(dir).startsWith(base + path.sep)) return { ok: false, error: 'only user-installed drop-in apps can be deleted here' };
+  try { fs.rmSync(path.resolve(dir), { recursive: true, force: true }); return { ok: true }; }
+  catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+}
 // Secret-at-rest store: encrypts the secret-typed config fields (dashboard tokens / Basic passwords /
 // custom header values / app secret options) in config.json via Electron safeStorage. The in-memory
 // `config` stays plaintext; encryption happens only at the disk boundary (saveConfig). safeStorage
@@ -876,7 +966,7 @@ app.whenReady().then(async () => {
   try {
     sysserver = require('./sysserver');
     serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onAppLaunch, getGridTiles: getActiveAppTiles, getAppConfig: activeServedAppConfig, onOpenExternal: openExternalUrl, appFolders: discoveredServedApps() });
-    ensureSystemViewPage(serverPort); ensureMusicPage();
+    ensureSystemViewPage(serverPort); ensureMusicPage(); ensureDropInDir();
     const env = loadEnv(); haschedule.configure({ url: env.HA_URL, token: env.HA_TOKEN });   // HA Schedule dev app creds
     console.log('SystemView + Music on http://127.0.0.1:' + serverPort + (env.HA_URL ? ' · HA Schedule -> ' + env.HA_URL : ''));
   } catch (e) { console.log('local panel services failed to start:', e.message); }
@@ -972,6 +1062,24 @@ app.whenReady().then(async () => {
     if (!isFrom(e, configWin)) return null;
     const r = await dialog.showOpenDialog(configWin, { properties: ['openDirectory'] });
     return (r.canceled || !r.filePaths.length) ? null : r.filePaths[0];
+  });
+  // Drop-in app manager (Settings → Drop-In Apps)
+  ipcMain.handle('listDropInApps', (e) => isFrom(e, configWin) ? listDropInApps() : []);
+  ipcMain.handle('pickZip', async (e) => {
+    if (!isFrom(e, configWin)) return null;
+    const r = await dialog.showOpenDialog(configWin, { properties: ['openFile'], filters: [{ name: 'Zip archive', extensions: ['zip'] }] });
+    return (r.canceled || !r.filePaths.length) ? null : r.filePaths[0];
+  });
+  ipcMain.handle('importDropInApp', (e, zipPath, forceId, confirmExec) => isFrom(e, configWin) ? importDropInApp(zipPath, forceId, confirmExec) : { ok: false });
+  ipcMain.handle('exportDropInApp', (e, id) => isFrom(e, configWin) ? exportDropInApp(id) : { ok: false });
+  ipcMain.handle('deleteDropInApp', (e, id) => isFrom(e, configWin) ? deleteDropInApp(id) : { ok: false });
+  ipcMain.handle('getDropInInfo', (e) => isFrom(e, configWin) ? { location: (config.settings && config.settings.dropInLocation) || 'appdata', dir: dropInDir() } : null);
+  ipcMain.handle('setDropInLocation', (e, loc) => {
+    if (!isFrom(e, configWin)) return null;
+    if (!config.settings) config.settings = {};
+    config.settings.dropInLocation = loc === 'localappdata' ? 'localappdata' : 'appdata';
+    saveConfig(); ensureDropInDir();
+    return { location: config.settings.dropInLocation, dir: dropInDir() };
   });
   ipcMain.handle('getAppIcon', (e, value) => isFrom(e, configWin) ? getAppIconDataUrl(value) : null);
   // Sync: editor preview reads a local image as a data: URL through main (the config preload is sandboxed,

@@ -1,10 +1,11 @@
 # Apps
 
-Local web apps live in `apps/`. Legacy bundled apps are still listed in
-`apps/apps.json`; new apps can also be dropped in as self-contained folders under
-`apps/<app-id>/` with their own manifest. In the editor, **+ App** adds an app
-page: pick the app and set its options, and open-quake loads it full-screen on
-the panel with no hand-typed URLs.
+Bundled apps are listed in `apps/apps.json`. Additional **drop-in apps** are
+self-contained folders (a manifest plus their files) that live in your user-data
+folder — **`%APPDATA%\open-quake\apps`** by default (see *Storage location* below) — so
+they survive app updates. The easiest way to add one is **Settings → Drop-In Apps → Add**.
+In the editor, **+ App** adds an app page: pick the app and set its options, and
+open-quake loads it full-screen on the panel with no hand-typed URLs.
 
 Included apps:
 - **Flip Clock** — split-flap animation, 12/24-hour, optional seconds, and a corner
@@ -23,16 +24,22 @@ Included apps:
 
 ## Drop-in folder apps
 
-Create a folder under `apps/`:
+A drop-in app is a self-contained folder. Install it the easy way with
+**Settings → Drop-In Apps → Add (import .zip)**, or place the folder by hand in your
+drop-in apps folder (**`%APPDATA%\open-quake\apps`** by default — see *Storage location*
+below):
 
 ```text
-apps/
-  my-app/
+%APPDATA%\open-quake\apps\
+  my-app\
     app.json
     index.html
     style.css
     app.js
 ```
+
+open-quake only discovers drop-in apps from that user-data folder — **not** from the
+bundled install directory — so an update never wipes them out.
 
 The manifest can be named `app.json` or `manifest.json`:
 
@@ -58,6 +65,25 @@ Rules:
 
 After adding or editing a folder app, click **Refresh** beside the App dropdown
 in the editor to reload manifests.
+
+## Managing drop-in apps (Settings → Drop-In Apps)
+
+The editor's **Settings → Drop-In Apps** tab manages app folders for you:
+
+- **Add (import .zip)** — pick a `.zip`; it's unzipped into your drop-in folder. If its `id`
+  already exists you're prompted to rename it, and if the app bundles **executable code** (a
+  `server` module or programs/scripts) you're warned to confirm you trust the source first.
+- **Export** — zip an installed drop-in app to share it.
+- **Delete** — remove an app's folder.
+- **Refresh** — re-scan for changes (import and delete refresh automatically).
+- **Community apps ↗** — opens the
+  [community-apps](https://github.com/TeeJS/open-quake/tree/main/community-apps) folder.
+
+**Storage location** (Advanced) — drop-in apps live in **`%APPDATA%\open-quake\apps`** by default
+(switchable to `%LOCALAPPDATA%\open-quake\apps`). This is the **only** place open-quake looks for
+drop-in apps, and it **survives app updates** — unlike the install folder, which an update
+overwrites. Switching the location moves where new imports land; move any existing app folders
+across yourself if you change it.
 
 ## Static and served modes
 

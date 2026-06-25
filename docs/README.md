@@ -7,7 +7,7 @@ Detailed guides for open-quake. Back to the [project README](../README.md).
 - **[The editor](editor.md)** — build pages of tiles; merge, drag-and-drop, icons, Save
 - **[Macros & keystrokes](macros.md)** — hotkey tiles + multi-step macros (+ AutoHotkey)
 - **[Web dashboards](dashboards.md)** — full-screen web pages + per-page auth
-- **[Bundled apps](apps.md)** — what's included, and writing your own
+- **[Apps & drop-ins](apps.md)** — bundled apps, writing your own, and the drop-in app manager
 - **[Music controller](music.md)** — now-playing, transport, album art, lyrics, button strip
 - **[System monitor](system-monitor.md)** — live CPU/GPU/RAM/disk/network/battery
 - **[Open WebUI chat + voice](ai-chat.md)** — chat to your LLM, hold the knob to talk
