@@ -19,6 +19,17 @@ ring, microphone), a **Theme** tab (light/dark + accent color), and an **Apps** 
   **Override theme accent** to set its hue/saturation by hand instead. Changes apply to
   the ring **instantly**; **Save to device** writes them to the device's own memory so
   they persist across power-cycles.
+- **Knob behavior** (under the ring controls) — what **turning** and **clicking** the knob
+  does, set per page **kind** (grid / dashboard / app):
+  - **Turn** — *Scroll pages* (default: previous/next page), *System volume*, *Scroll in
+    window* (scrolls the page, e.g. a dashboard or the Music lyrics), or *Select button*
+    (highlights tiles one-by-one with a thick accent border; wraps around).
+  - **Click** — *Start/stop rotation* (default; shows an on-screen indicator), *System audio
+    toggle* (mute), or *Enter* (activates the highlighted button, play/pauses the Music app,
+    or otherwise sends a real Enter key to the PC).
+  - **Per-page override** — any page can override its kind's defaults in that page's
+    **Advanced settings** (tick *Knob → Override*). A **double-click** always opens the page
+    selector regardless.
 - **Microphone** — the on-board mic's LED lights whenever the mic is enabled (it's a
   single hardware switch). Choose whether it's on at launch, and toggle it any time from
   the tray menu or a **System → mic** tile.

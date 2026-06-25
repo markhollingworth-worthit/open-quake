@@ -6,7 +6,8 @@ list holds your **pages** — each is a tile **Grid**, a web **Dashboard**, or a
 ![The grid editor — the Default page](shots/editor-default.png)
 
 On a grid page you can:
-- **Edit tiles** — label, action (app / URL / shell command / open file / system, or
+- **Edit tiles** — label, action (app / URL / shell command / open file / system /
+  **Send keystroke** / **Macro** — see [Macros & keystrokes](macros.md) — or
   **Go to open-quake page** to jump to another of your pages), and icon: an **emoji**,
   the program's **own icon**, a local **image** file, or an **image URL** — paste a link
   and **Fetch**, and it's downloaded and cached so the icon works offline.

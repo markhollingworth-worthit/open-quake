@@ -5,12 +5,13 @@ Detailed guides for open-quake. Back to the [project README](../README.md).
 ## Using it
 
 - **[The editor](editor.md)** — build pages of tiles; merge, drag-and-drop, icons, Save
+- **[Macros & keystrokes](macros.md)** — hotkey tiles + multi-step macros (+ AutoHotkey)
 - **[Web dashboards](dashboards.md)** — full-screen web pages + per-page auth
 - **[Bundled apps](apps.md)** — what's included, and writing your own
-- **[Music controller](music.md)** — now-playing, transport, embedded app grid
+- **[Music controller](music.md)** — now-playing, transport, album art, lyrics, button strip
 - **[System monitor](system-monitor.md)** — live CPU/GPU/RAM/disk/network/battery
 - **[Open WebUI chat + voice](ai-chat.md)** — chat to your LLM, hold the knob to talk
-- **[Settings & knob lighting](settings.md)** — launch mode, rotation, RGB ring, mic
+- **[Settings & knob](settings.md)** — launch mode, rotation, RGB ring, knob behavior, mic
 
 ## Under the hood
 
