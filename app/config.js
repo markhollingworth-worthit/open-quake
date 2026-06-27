@@ -915,9 +915,16 @@
         const sub = e.area ? ' · ' + e.area : '';
         return `<option value="${esc(e.entityId)}" ${e.entityId === t.value ? 'selected' : ''}>${fmark}${esc(e.friendlyName)}${sub} (${esc(e.entityId)})</option>`;
       });
-      // Surface a saved entity that's no longer in the cache so the user can see what's stored.
-      if (t.value && !list.some(e => e.entityId === t.value)) opts.unshift(`<option value="${esc(t.value)}" selected>${esc(t.value)} (not in current cache)</option>`);
-      entSel.innerHTML = opts.length ? opts.join('') : '<option value="" disabled>(no entities match these filters)</option>';
+      // Surface a saved entity that's hidden by the current filters (or genuinely missing from the
+      // cache) so it stays visible as the current selection. Distinguish the two cases so a saved
+      // entity that's filtered out doesn't masquerade as "missing".
+      if (t.value && !list.some(e => e.entityId === t.value)) {
+        const inCache = entities.find(e => e.entityId === t.value);
+        opts.unshift(inCache
+          ? `<option value="${esc(t.value)}" selected>${esc(inCache.friendlyName)} (${esc(t.value)}) — hidden by current filters</option>`
+          : `<option value="${esc(t.value)}" selected>${esc(t.value)} (not in current cache)</option>`);
+      }
+      entSel.innerHTML = opts.length ? opts.join('') : '<option value="" disabled>— 0 entities match these filters —</option>';
       refreshServiceList();
       refreshStar();
       status.textContent = list.length + ' entit' + (list.length === 1 ? 'y' : 'ies') + (cache.entities.length === list.length ? '' : ' of ' + cache.entities.length + ' total');
