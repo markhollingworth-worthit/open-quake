@@ -204,7 +204,11 @@
   function appHidden(id) { return (((config.settings || {}).hiddenApps) || []).includes(id); }
   function devShown(id) { return (((config.settings || {}).shownDevApps) || []).includes(id); }
   function devEnabled() { return !!((config.settings || {}).devApps); }
-  function appVisible(a) { return a && a.dev ? devShown(a.id) : !appHidden(a.id); }
+  function appVisible(a) {
+    if (!a) return false;
+    if (a.id === 'ha-dashboard' && !((config.settings || {}).haAuth || {}).useHa) return false;   // hidden until Use HA is on
+    return a.dev ? devShown(a.id) : !appHidden(a.id);
+  }
   async function refreshApps() {
     try { appDefs = await configApi.getApps(); } catch (e) { appDefs = []; }
     render();
@@ -761,24 +765,28 @@
       const sel = document.getElementById('haDashSel');
       const msg = document.getElementById('haDashMsg');
       const ref = document.getElementById('haDashRefresh');
-      const populate = async () => {
-        const ha = (config.settings || {}).haAuth || {};
-        if (!ha.url || !ha.token) { msg.textContent = 'Set HA URL and Long-Lived Access Token in the Auth tab first.'; msg.style.color = '#c98'; return; }
-        msg.textContent = 'Loading dashboards…'; msg.style.color = '#7e93ab';
-        try {
-          const list = await fetchHaDashboards(ha.url, ha.token);
-          // HA's lovelace/dashboards/list excludes the default Overview dashboard; prepend it so it's pickable.
-          const items = [{ url_path: 'lovelace', title: 'Overview (default)' }].concat(list.map(d => ({ url_path: d.url_path, title: d.title })));
-          const cur = (g.options && g.options.dashboard) || 'lovelace';
-          sel.innerHTML = items.map(it => `<option value="${esc(it.url_path)}" ${it.url_path === cur ? 'selected' : ''}>${esc(it.title || it.url_path)} (${esc(it.url_path)})</option>`).join('');
-          msg.textContent = items.length + ' dashboard' + (items.length === 1 ? '' : 's') + ' loaded.'; msg.style.color = '#7e93ab';
-        } catch (e) {
-          msg.textContent = 'Could not load dashboards: ' + (e.message || 'error'); msg.style.color = '#c98';
+      const fillFromCache = c => {
+        if (!c || !c.ok) {
+          msg.textContent = c && c.error ? 'HA cache not loaded: ' + c.error + '. Click Refresh, or check the Auth tab.' : 'HA cache not loaded. Click Refresh, or enable Use Home Assistant in the Auth tab.';
+          msg.style.color = '#c98';
+          return;
         }
+        // HA's lovelace/dashboards/list excludes the default Overview dashboard; prepend it so it's pickable.
+        const items = [{ url_path: 'lovelace', title: 'Overview (default)' }].concat((c.dashboards || []).map(d => ({ url_path: d.url_path, title: d.title })));
+        const cur = (g.options && g.options.dashboard) || 'lovelace';
+        sel.innerHTML = items.map(it => `<option value="${esc(it.url_path)}" ${it.url_path === cur ? 'selected' : ''}>${esc(it.title || it.url_path)} (${esc(it.url_path)})</option>`).join('');
+        msg.textContent = items.length + ' dashboard' + (items.length === 1 ? '' : 's') + ' available.';
+        msg.style.color = '#7e93ab';
+      };
+      const refresh = async () => {
+        ref.disabled = true; msg.textContent = 'Refreshing HA cache…'; msg.style.color = '#7e93ab';
+        try { fillFromCache(await configApi.refreshHaCache()); }
+        catch (e) { msg.textContent = 'Refresh failed: ' + (e.message || e); msg.style.color = '#c98'; }
+        finally { ref.disabled = false; }
       };
       sel.onchange = e => { if (!g.options) g.options = {}; g.options.dashboard = e.target.value; markDirty(); };
-      ref.onclick = populate;
-      populate();
+      ref.onclick = refresh;
+      configApi.getHaCache().then(fillFromCache);   // show whatever's currently cached
     } else {
       renderAppOpts(g, def);
     }
@@ -787,37 +795,6 @@
   }
   // Music: only 2 of {button grid, album art, lyrics} fit at once. Disable the unchecked third.
   function optVal(g, key, dflt) { const o = g.options || {}; return (key in o) ? o[key] : dflt; }
-  // Fetch the user's Lovelace dashboards from a Home Assistant server over its WebSocket API. Runs
-  // entirely in the editor renderer (the global haAuth token is already in the decrypted in-memory
-  // config). Resolves with the raw lovelace/dashboards/list result (default "Overview" not included --
-  // HA doesn't return it, the caller prepends it).
-  function fetchHaDashboards(haUrl, token) {
-    return new Promise((resolve, reject) => {
-      let wsHref;
-      try {
-        const u = new URL(haUrl);
-        u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
-        u.pathname = u.pathname.replace(/\/+$/, '') + '/api/websocket';
-        wsHref = u.href;
-      } catch (e) { return reject(new Error('invalid HA URL')); }
-      let done = false;
-      let ws;
-      try { ws = new WebSocket(wsHref); } catch (e) { return reject(new Error('could not open WebSocket')); }
-      const finish = (err, result) => { if (done) return; done = true; clearTimeout(to); try { ws.close(); } catch (e) {} err ? reject(err) : resolve(result); };
-      const to = setTimeout(() => finish(new Error('timed out talking to HA')), 8000);
-      ws.onerror = () => finish(new Error('connection failed (check URL and that HA is reachable)'));
-      ws.onmessage = ev => {
-        let msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
-        if (msg.type === 'auth_required') ws.send(JSON.stringify({ type: 'auth', access_token: token }));
-        else if (msg.type === 'auth_invalid') finish(new Error('token rejected by HA: ' + (msg.message || 'auth invalid')));
-        else if (msg.type === 'auth_ok') ws.send(JSON.stringify({ id: 1, type: 'lovelace/dashboards/list' }));
-        else if (msg.type === 'result' && msg.id === 1) {
-          if (msg.success) finish(null, Array.isArray(msg.result) ? msg.result : []);
-          else finish(new Error('dashboards list failed: ' + ((msg.error || {}).message || 'unknown')));
-        }
-      };
-    });
-  }
   function musicPanels(g) { return { grid: !!g.gridOn, art: !!optVal(g, 'art', true), lyrics: !!optVal(g, 'lyrics', false) }; }
   function enforceMusicCap(g) {
     if (!g || g.app !== 'music') return;
@@ -1004,10 +981,13 @@
 
     // Auth tab — credentials shared across the app (currently just Home Assistant). Token is stored
     // encrypted at rest via secretStore (same path as settings.spotify.refreshToken).
-    const ha = (s.haAuth && typeof s.haAuth === 'object') ? s.haAuth : { url: '', token: '' };
+    const ha = (s.haAuth && typeof s.haAuth === 'object') ? s.haAuth : { url: '', token: '', useHa: false };
     const authHtml = `
       <p class="sectitle">Home Assistant</p>
-      <p class="hint">Used by the HA Schedule developer app and any other open-quake feature that needs a global HA credential. Per-dashboard tokens stay on the dashboard page itself.</p>
+      <div class="row"><label class="iconopt" style="width:auto"><input type="checkbox" id="sHaUse" ${ha.useHa ? 'checked' : ''}> Use Home Assistant</label>
+        <button id="sHaRefresh" type="button" style="margin-left:12px" ${ha.useHa ? '' : 'disabled'}>Refresh Configuration</button>
+        <span id="sHaStatus" class="hint" style="margin:0 0 0 10px"></span></div>
+      <p class="hint">When on, open-quake caches your HA dashboards, areas, devices, entities, floors, and labels at startup. The Home Assistant Dashboard app and (later) entity-aware features depend on this cache.</p>
       <div class="row"><label>URL</label>
         <input type="text" id="sHaUrl" value="${esc(ha.url || '')}" placeholder="http://homeassistant.local:8123" style="flex:1"></div>
       <div class="row"><label>Long-Lived Access Token</label>
@@ -1131,12 +1111,43 @@
     if (tab === 'auth') {
       const saveHa = patch => {
         if (!config.settings) config.settings = {};
-        const cur = (config.settings.haAuth && typeof config.settings.haAuth === 'object') ? config.settings.haAuth : { url: '', token: '' };
-        config.settings.haAuth = Object.assign({ url: '', token: '' }, cur, patch);
+        const cur = (config.settings.haAuth && typeof config.settings.haAuth === 'object') ? config.settings.haAuth : { url: '', token: '', useHa: false };
+        config.settings.haAuth = Object.assign({ url: '', token: '', useHa: false }, cur, patch);
         markDirty();
       };
+      const useBox = document.getElementById('sHaUse');
+      const refBtn = document.getElementById('sHaRefresh');
+      const statusEl = document.getElementById('sHaStatus');
+      const fmtAge = ts => {
+        if (!ts) return 'never';
+        const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+        if (s < 60) return s + 's ago';
+        if (s < 3600) return Math.round(s / 60) + ' min ago';
+        return Math.round(s / 3600) + ' h ago';
+      };
+      const showStatus = c => {
+        if (!c) { statusEl.textContent = ''; return; }
+        if (!c.ts) { statusEl.textContent = 'Not loaded yet.'; statusEl.style.color = '#7e93ab'; return; }
+        if (!c.ok) { statusEl.textContent = 'Error: ' + (c.error || 'unknown') + ' (' + fmtAge(c.ts) + ')'; statusEl.style.color = '#c98'; return; }
+        statusEl.textContent = (c.dashboards.length + ' dashboards, ' + c.entities.length + ' entities, ' + c.areaRegistry.length + ' areas, ' + c.deviceRegistry.length + ' devices') + (c.floorRegistry.length ? ', ' + c.floorRegistry.length + ' floors' : '') + (c.labelRegistry.length ? ', ' + c.labelRegistry.length + ' labels' : '') + ' (' + fmtAge(c.ts) + ')';
+        statusEl.style.color = '#7e93ab';
+      };
+      const refresh = async () => {
+        refBtn.disabled = true; statusEl.textContent = 'Refreshing…'; statusEl.style.color = '#7e93ab';
+        try { showStatus(await configApi.refreshHaCache()); }
+        catch (e) { statusEl.textContent = 'Refresh failed: ' + (e.message || e); statusEl.style.color = '#c98'; }
+        finally { refBtn.disabled = !useBox.checked; }
+      };
+      useBox.onchange = e => {
+        saveHa({ useHa: e.target.checked });
+        refBtn.disabled = !e.target.checked;
+        if (!e.target.checked) { statusEl.textContent = 'Use HA is off. Save to clear the cache on next launch.'; statusEl.style.color = '#7e93ab'; }
+        else statusEl.textContent = 'Click Refresh Configuration to load.';
+      };
+      refBtn.onclick = refresh;
       document.getElementById('sHaUrl').oninput = e => saveHa({ url: e.target.value.trim() });
       document.getElementById('sHaToken').oninput = e => saveHa({ token: e.target.value.trim() });
+      configApi.getHaCache().then(showStatus);   // initial status from whatever main has cached
     }
 
     if (tab === 'software') {

@@ -24,6 +24,10 @@ contextBridge.exposeInMainWorld('openQuakeConfig', {
   getLighting() { return ipcRenderer.invoke('getLighting'); },
   setLighting(lighting) { ipcRenderer.send('setLighting', lighting); },
   saveLightingToDevice() { return ipcRenderer.invoke('saveLightingToDevice'); },
+  // Global Home Assistant cache: registries + dashboards in main's memory; per-entity states lazy.
+  getHaCache() { return ipcRenderer.invoke('getHaCache'); },
+  refreshHaCache() { return ipcRenderer.invoke('refreshHaCache'); },
+  fetchHaEntityState(entityId) { return ipcRenderer.invoke('fetchHaEntityState', entityId); },
   pathToFileURL(filePath) {
     try { return pathToFileURL(filePath).href; }
     catch (e) { return ''; }

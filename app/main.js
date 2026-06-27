@@ -14,6 +14,7 @@ const { createMediaKeys } = require('./mediaKeys');
 const { createSecretStore } = require('./secretStore');
 const nowplaying = require('./nowplaying');   // same singleton sysserver polls — read its snapshot to target transport
 const haschedule = require('./haschedule');   // HA Schedule dev app — fed HA creds from .env, polled while shown
+const haClient = require('./haClient');       // Global HA cache (registries + dashboards); per-entity states fetched lazily
 const ahk = require('./ahk');                  // macro "ahk" step backend (shells out to an installed AutoHotkey.exe)
 const HA_SCHEDULE_APPS = ['haschedule', 'agenda', 'events'];   // dev apps backed by the shared HA /haschedule-data snapshot
 
@@ -34,6 +35,11 @@ let lastRingEffect = LED_DEFAULT.effect; // remembered so the tray on/off toggle
 let rotateRunning = false;               // screen-rotation runtime on/off (starts per settings on launch)
 let rotTimer = null;
 let monitorMode = false;                 // monitor mode: panel UI hidden so the device shows the Windows desktop
+// Global HA cache — registries + dashboards in memory, per-entity states populated on demand.
+// `ok=false, ts=0` is the "never loaded" initial state. Refreshed on whenReady (if useHa) and on
+// explicit Refresh from the Auth tab; no auto-refresh on settings save.
+let haCache = { ok: false, ts: 0, error: null, dashboards: [], entities: [], areaRegistry: [], deviceRegistry: [], entityRegistry: [], floorRegistry: [], labelRegistry: [], states: {} };
+let haRefreshInFlight = null;            // Promise — coalesces concurrent refresh requests
 let touchDown = false, touchIdle = null; // monitor-mode touch -> OS mouse button state
 let sysserver = null;                    // SystemView/Music local server (lazy-required in whenReady)
 let serverPort = 0;                      // the local server's ephemeral port (for music-page routing)
@@ -959,6 +965,44 @@ app.on('second-instance', () => {
   else openConfigWindow();
 });
 
+// Reload the HA cache from the configured haAuth credentials. Coalesces concurrent calls so the
+// Auth-tab Refresh button + a boot-time auto-refresh can fire together without double-loading.
+// Always resolves with the current cache (success OR a populated error state) — never rejects.
+function refreshHaCache() {
+  if (haRefreshInFlight) return haRefreshInFlight;
+  const ha = (config.settings && config.settings.haAuth) || {};
+  if (!ha.useHa) {
+    haCache = { ok: false, ts: Date.now(), error: 'Use Home Assistant is off', dashboards: [], entities: [], areaRegistry: [], deviceRegistry: [], entityRegistry: [], floorRegistry: [], labelRegistry: [], states: {} };
+    return Promise.resolve(haCache);
+  }
+  if (!ha.url || !ha.token) {
+    haCache = { ok: false, ts: Date.now(), error: 'HA URL and token required (Auth tab)', dashboards: [], entities: [], areaRegistry: [], deviceRegistry: [], entityRegistry: [], floorRegistry: [], labelRegistry: [], states: {} };
+    return Promise.resolve(haCache);
+  }
+  haRefreshInFlight = haClient.fetchAll(ha.url, ha.token).then(c => {
+    haCache = c;
+    console.log('[ha] cache: ' + c.dashboards.length + ' dashboards, ' + c.entities.length + ' entities, ' + c.areaRegistry.length + ' areas, ' + c.deviceRegistry.length + ' devices, ' + c.floorRegistry.length + ' floors, ' + c.labelRegistry.length + ' labels');
+    return c;
+  }).catch(e => {
+    haCache = { ok: false, ts: Date.now(), error: e.message || String(e), dashboards: [], entities: [], areaRegistry: [], deviceRegistry: [], entityRegistry: [], floorRegistry: [], labelRegistry: [], states: {} };
+    console.log('[ha] cache refresh failed: ' + (e.message || e));
+    return haCache;
+  }).finally(() => { haRefreshInFlight = null; });
+  return haRefreshInFlight;
+}
+
+// Fetch a single entity's state (REST), cache it, and patch the synthesized entities[] slot if present.
+// Used by phase-2 features that assign an entity to a button; not wired into any UI yet.
+async function fetchHaEntityState(entityId) {
+  const ha = (config.settings && config.settings.haAuth) || {};
+  if (!ha.useHa || !ha.url || !ha.token) throw new Error('HA not configured');
+  const s = await haClient.fetchEntityState(ha.url, ha.token, entityId);
+  haCache.states[entityId] = s;
+  const e = haCache.entities.find(x => x.entityId === entityId);
+  if (e) { e.state = s.state; e.supportedFeatures = s.supportedFeatures; }
+  return s;
+}
+
 app.whenReady().then(async () => {
   // safeStorage requires app-ready, so secrets loaded at module init are still encrypted strings in
   // `config` here — decrypt them in memory before anything reads a secret VALUE. If the on-disk config
@@ -1011,6 +1055,11 @@ app.whenReady().then(async () => {
     contents.on('did-navigate', flushDashCookies);                             // commit cookies (e.g. a fresh login) to disk after the page settles
   });
 
+  // Boot-time HA cache warmup. Fire and forget — UIs that need the cache (the dashboard picker,
+  // future entity pickers) will see ok:false until this resolves; they can also kick a manual
+  // refresh from the Auth tab. Skipped when Use HA is off or credentials are missing.
+  if ((config.settings && config.settings.haAuth && config.settings.haAuth.useHa)) refreshHaCache();
+
   ipcMain.on('launch', (e, a) => { if (!isFrom(e, panelWin)) return; runAction(a); });
   ipcMain.on('volume', (e, v) => { if (!isFrom(e, panelWin)) return; mediaKeys.volume(v); });
   ipcMain.on('media', (e, cmd) => { if (!isFrom(e, panelWin)) return; mediaKey(cmd); });   // knob 'enter' on the music page -> play/pause
@@ -1034,6 +1083,14 @@ app.whenReady().then(async () => {
   });
   ipcMain.on('openExternal', (e, url) => { if (!isFrom(e, panelWin) && !isFrom(e, configWin)) return; openExternalUrl(url); });
   ipcMain.handle('getConfig', (e) => isFrom(e, configWin) ? config : null);
+  // HA cache: editor reads the registries + dashboards for picker UIs; refresh kicks a new fetchAll.
+  // fetchHaEntityState is wired now for phase-2 features that assign an entity to a button.
+  ipcMain.handle('getHaCache', (e) => isFrom(e, configWin) ? haCache : null);
+  ipcMain.handle('refreshHaCache', (e) => isFrom(e, configWin) ? refreshHaCache() : null);
+  ipcMain.handle('fetchHaEntityState', (e, entityId) => {
+    if (!isFrom(e, configWin)) return null;
+    return fetchHaEntityState(entityId).catch(err => ({ error: err.message || String(err) }));
+  });
   ipcMain.handle('getApps', (e) => {
     if (!isFrom(e, configWin)) return [];
     const catalog = appCatalog();
