@@ -553,12 +553,66 @@ function sweepIconCache() {
   try { files = fs.readdirSync(ICON_CACHE_DIR); } catch (e) { return; }   // no cache dir yet -> nothing to sweep
   const used = new Set();
   for (const g of (config.grids || [])) for (const t of (g.tiles || [])) {
-    if (t && t.iconType === 'url' && t.iconCache) used.add(path.basename(t.iconCache));
+    if (t && (t.iconType === 'url' || t.iconType === 'ha') && t.iconCache) used.add(path.basename(t.iconCache));
   }
   let removed = 0;
   for (const f of files) { if (!used.has(f)) { try { fs.unlinkSync(path.join(ICON_CACHE_DIR, f)); removed++; } catch (e) {} } }
   if (removed) console.log('icon cache: removed ' + removed + ' orphaned file(s)');
 }
+// Emoji approximations for the most common Home Assistant MDI icon names + per-domain fallbacks.
+// Mirrors the renderer-side table in config.js so HA entity tiles render the same icon on the
+// panel as in the editor preview. Pattern matching is exact-or-hyphenated (so "mdi:lockable"
+// never falsely matches "mdi:lock"), order is most-specific first.
+const HA_MDI_EMOJI = [
+  ['mdi:weather-sunny', '☀️'], ['mdi:weather-cloudy', '☁️'], ['mdi:weather-rainy', '🌧️'],
+  ['mdi:weather-pouring', '🌧️'], ['mdi:weather-snowy', '❄️'], ['mdi:weather-night', '🌙'],
+  ['mdi:lock-open', '🔓'], ['mdi:robot-vacuum', '🧹'], ['mdi:motion-sensor', '🚶'],
+  ['mdi:smoke-detector', '🔥'], ['mdi:water-pump', '💧'], ['mdi:garage-open', '🚗'],
+  ['mdi:weather', '⛅'], ['mdi:lightbulb', '💡'], ['mdi:lamp', '💡'], ['mdi:bulb', '💡'],
+  ['mdi:lock', '🔒'], ['mdi:speaker', '🔊'], ['mdi:volume', '🔊'],
+  ['mdi:thermometer', '🌡️'], ['mdi:thermostat', '🌡️'], ['mdi:fan', '🌀'],
+  ['mdi:tv', '📺'], ['mdi:television', '📺'], ['mdi:music', '🎵'], ['mdi:play', '▶️'],
+  ['mdi:cctv', '📷'], ['mdi:camera', '📷'], ['mdi:garage', '🚗'], ['mdi:car', '🚗'],
+  ['mdi:bike', '🚲'], ['mdi:door', '🚪'], ['mdi:fridge', '🧊'], ['mdi:refrigerator', '🧊'],
+  ['mdi:battery', '🔋'], ['mdi:vacuum', '🧹'], ['mdi:window', '🪟'],
+  ['mdi:blinds', '🪟'], ['mdi:curtains', '🪟'], ['mdi:alarm', '🚨'],
+  ['mdi:doorbell', '🔔'], ['mdi:bell', '🔔'], ['mdi:human', '👤'],
+  ['mdi:account', '👤'], ['mdi:person', '👤'], ['mdi:home', '🏠'], ['mdi:eye', '👁️'],
+  ['mdi:fire', '🔥'], ['mdi:smoke', '🔥'], ['mdi:leak', '💧'], ['mdi:flood', '💧'],
+  ['mdi:water', '💧'], ['mdi:sun', '☀️'], ['mdi:moon', '🌙'],
+  ['mdi:gauge', '📊'], ['mdi:chart', '📊'], ['mdi:walk', '🚶'], ['mdi:run', '🏃'],
+  ['mdi:flash', '⚡'], ['mdi:power', '⚡'], ['mdi:lightning', '⚡'], ['mdi:bookmark', '🔖'],
+];
+const HA_DOMAIN_EMOJI = {
+  light: '💡', switch: '🔌',
+  input_boolean: '🔘', input_button: '🔘', input_select: '📋', input_number: '🔢',
+  input_text: '✏️', input_datetime: '📅',
+  lock: '🔒', media_player: '🔊', cover: '🪟',
+  climate: '🌡️', weather: '⛅', fan: '🌀', vacuum: '🧹',
+  scene: '🎬', script: '📜', automation: '🤖',
+  sensor: '📊', binary_sensor: '🔘',
+  camera: '📷', alarm_control_panel: '🚨',
+  water_heater: '💧', sun: '☀️',
+  person: '👤', device_tracker: '📍', zone: '📍',
+  timer: '⏲️', counter: '🔢', notify: '🔔', group: '📁',
+};
+function haMdiToEmoji(name) {
+  if (typeof name !== 'string' || !name) return null;
+  const low = name.toLowerCase();
+  for (const [pat, em] of HA_MDI_EMOJI) if (low === pat || low.startsWith(pat + '-')) return em;
+  return null;
+}
+function haEntityEmoji(entityId) {
+  // Prefer the registry override -> mdi mapping -> domain fallback. State attributes (live mdi)
+  // would be richer but main only has them for entities the renderer has touched; for the panel
+  // push we go with registry + domain to avoid stalling on per-entity fetches.
+  if (haCache && Array.isArray(haCache.entityRegistry)) {
+    const reg = haCache.entityRegistry.find(r => r.entity_id === entityId);
+    if (reg && reg.icon) { const em = haMdiToEmoji(reg.icon); if (em) return em; }
+  }
+  return HA_DOMAIN_EMOJI[(entityId || '').split('.')[0] || ''] || '🏠';
+}
+
 // Resolve app/image icons to a data: URL the panel renderer can draw (works in native + http pages).
 async function resolveTiles(tiles) {
   return Promise.all((tiles || []).map(async t => {
@@ -568,6 +622,13 @@ async function resolveTiles(tiles) {
       if (!out.iconSrc) { try { out.iconSrc = pathToFileURL(t.iconImage).href; } catch (e) {} }   // fallback
     }
     else if (t.iconType === 'url' && t.iconCache) { out.iconSrc = imageFileToDataUrl(t.iconCache); }   // cached download -> data URL; null (gone) -> emoji fallback
+    else if (t.iconType === 'ha' && t.value) {
+      // HA entity tile: editor cached the entity_picture into t.iconCache (when available) via the
+      // same fetchIconToCache pipeline as URL icons. Otherwise stamp an emoji approximation onto
+      // out.icon so the panel's text-icon path renders it instead of the generic ▫️ placeholder.
+      if (t.iconCache) { out.iconSrc = imageFileToDataUrl(t.iconCache); }
+      if (!out.iconSrc && !out.icon) out.icon = haEntityEmoji(t.value);
+    }
     else if (t.iconType === 'app') { const d = await getAppIconDataUrl(t.value); if (d) out.iconSrc = d; }
     return out;
   }));

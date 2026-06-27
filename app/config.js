@@ -75,6 +75,102 @@
   const baseName = p => p.split(/[\\/]/).pop().replace(/\.(exe|lnk|bat|cmd|com)$/i, '');
   const iconTypeOf = t => t.iconType || 'emoji';
 
+  // ---- HA icon resolution (phase 2 quick win) ----
+  // When the user picks "HA icon" for an HA entity tile, we resolve to:
+  //   1. The entity_picture (album art / snapshot / uploaded photo) -- fetched + cached via
+  //      ensureHaEntityPicture, then rendered like a URL icon. Stored in t.iconCache/iconUrl.
+  //   2. An emoji mapped from the entity's mdi:* icon (from state attrs OR entity_registry).
+  //   3. An emoji mapped from the domain.
+  //   4. A generic placeholder.
+  // Actual mdi-as-SVG rendering is later phase 2 work; this gets visual icons today with no CDN.
+  // Patterns match either exact ("mdi:lock") or the same followed by a hyphen ("mdi:lock-pattern"),
+  // so "mdi:lockable" never falsely matches "mdi:lock". Order matters: more specific first.
+  const HA_MDI_EMOJI = [
+    ['mdi:weather-sunny', '☀️'], ['mdi:weather-cloudy', '☁️'], ['mdi:weather-rainy', '🌧️'],
+    ['mdi:weather-pouring', '🌧️'], ['mdi:weather-snowy', '❄️'], ['mdi:weather-night', '🌙'],
+    ['mdi:lock-open', '🔓'], ['mdi:robot-vacuum', '🧹'], ['mdi:motion-sensor', '🚶'],
+    ['mdi:smoke-detector', '🔥'], ['mdi:water-pump', '💧'], ['mdi:garage-open', '🚗'],
+    ['mdi:weather', '⛅'], ['mdi:lightbulb', '💡'], ['mdi:lamp', '💡'], ['mdi:bulb', '💡'],
+    ['mdi:lock', '🔒'], ['mdi:speaker', '🔊'], ['mdi:volume', '🔊'],
+    ['mdi:thermometer', '🌡️'], ['mdi:thermostat', '🌡️'], ['mdi:fan', '🌀'],
+    ['mdi:tv', '📺'], ['mdi:television', '📺'], ['mdi:music', '🎵'], ['mdi:play', '▶️'],
+    ['mdi:cctv', '📷'], ['mdi:camera', '📷'], ['mdi:garage', '🚗'], ['mdi:car', '🚗'],
+    ['mdi:bike', '🚲'], ['mdi:door', '🚪'], ['mdi:fridge', '🧊'], ['mdi:refrigerator', '🧊'],
+    ['mdi:battery', '🔋'], ['mdi:vacuum', '🧹'], ['mdi:window', '🪟'],
+    ['mdi:blinds', '🪟'], ['mdi:curtains', '🪟'], ['mdi:alarm', '🚨'],
+    ['mdi:doorbell', '🔔'], ['mdi:bell', '🔔'], ['mdi:human', '👤'],
+    ['mdi:account', '👤'], ['mdi:person', '👤'], ['mdi:home', '🏠'], ['mdi:eye', '👁️'],
+    ['mdi:fire', '🔥'], ['mdi:smoke', '🔥'], ['mdi:leak', '💧'], ['mdi:flood', '💧'],
+    ['mdi:water', '💧'], ['mdi:sun', '☀️'], ['mdi:moon', '🌙'],
+    ['mdi:gauge', '📊'], ['mdi:chart', '📊'], ['mdi:walk', '🚶'], ['mdi:run', '🏃'],
+    ['mdi:flash', '⚡'], ['mdi:power', '⚡'], ['mdi:lightning', '⚡'], ['mdi:bookmark', '🔖'],
+  ];
+  const HA_DOMAIN_EMOJI = {
+    light: '💡', switch: '🔌',
+    input_boolean: '🔘', input_button: '🔘', input_select: '📋', input_number: '🔢',
+    input_text: '✏️', input_datetime: '📅',
+    lock: '🔒', media_player: '🔊', cover: '🪟',
+    climate: '🌡️', weather: '⛅', fan: '🌀', vacuum: '🧹',
+    scene: '🎬', script: '📜', automation: '🤖',
+    sensor: '📊', binary_sensor: '🔘',
+    camera: '📷', alarm_control_panel: '🚨',
+    water_heater: '💧', sun: '☀️',
+    person: '👤', device_tracker: '📍', zone: '📍',
+    timer: '⏲️', counter: '🔢', notify: '🔔', group: '📁',
+  };
+  function mdiToEmoji(name) {
+    if (typeof name !== 'string' || !name) return null;
+    const low = name.toLowerCase();
+    for (const [pat, em] of HA_MDI_EMOJI) if (low === pat || low.startsWith(pat + '-')) return em;
+    return null;
+  }
+  function haDomainEmoji(domain) { return HA_DOMAIN_EMOJI[domain] || '🏠'; }
+
+  // Local mirrors of main's haCache + per-entity states. Loaded on init, refreshed when the user
+  // clicks Refresh in the Auth tab. iconHtml needs synchronous access, so we keep these here.
+  let haCacheLocal = null;
+  const haStateCache = {};   // entityId -> state | null (in-flight) | false (failed/none)
+  async function ensureHaState(entityId) {
+    if (!entityId || Object.prototype.hasOwnProperty.call(haStateCache, entityId)) return;
+    haStateCache[entityId] = null;                       // mark in-flight to prevent duplicate fetches
+    try {
+      const s = await configApi.fetchHaEntityState(entityId);
+      haStateCache[entityId] = (s && !s.error) ? s : false;
+    } catch (e) { haStateCache[entityId] = false; }
+    render();
+  }
+  // Download an entity's picture into the URL-icon cache and stamp the tile so iconHtml renders it.
+  // Idempotent: skips when the cached URL already matches what we'd compute. Refetches when entity
+  // changes (the URL differs, so the iconCache check misses and we re-fetch).
+  async function ensureHaEntityPicture(t) {
+    if (!t || t.iconType !== 'ha' || !t.value) return;
+    const state = haStateCache[t.value];
+    if (typeof state !== 'object' || !state || !state.attributes) return;
+    const pic = state.attributes.entity_picture;
+    if (typeof pic !== 'string' || !pic) return;
+    const ha = ((config.settings || {}).haAuth) || {};
+    const fullUrl = /^https?:\/\//i.test(pic) ? pic : (ha.url || '').replace(/\/+$/, '') + (pic.startsWith('/') ? pic : '/' + pic);
+    if (!/^https?:\/\//i.test(fullUrl)) return;
+    if (t.iconUrl === fullUrl && t.iconCache) return;   // already cached this exact URL
+    try {
+      const r = await configApi.fetchIconUrl(fullUrl);
+      if (r && r.ok) { t.iconUrl = fullUrl; t.iconCache = r.cachePath; markDirty(); renderTiles(); renderIconPreview(t); }
+    } catch (e) {}
+  }
+  function haResolveEmoji(t) {
+    // Look at state first (mdi may differ from registry override at runtime)
+    const state = haStateCache[t.value];
+    if (typeof state === 'object' && state && state.attributes && typeof state.attributes.icon === 'string') {
+      const em = mdiToEmoji(state.attributes.icon);
+      if (em) return em;
+    }
+    if (haCacheLocal && Array.isArray(haCacheLocal.entityRegistry)) {
+      const reg = haCacheLocal.entityRegistry.find(r => r.entity_id === t.value);
+      if (reg && reg.icon) { const em = mdiToEmoji(reg.icon); if (em) return em; }
+    }
+    return haDomainEmoji((t.value || '').split('.')[0] || '');
+  }
+
   // ---- screen-rotation per-page opt-in ----
   function rotCatOn(g) { const c = (config.settings && config.settings.rotation && config.settings.rotation.cats) || {}; return !!c[g.kind === 'web' ? 'dashboards' : g.kind === 'app' ? 'apps' : 'grids']; }
   function rotRowHtml(g) {
@@ -244,6 +340,14 @@
     const type = iconTypeOf(t);
     if (type === 'image' && t.iconImage) return `<img class="${ctx === 'cell' ? 'cimg' : ''}" src="${esc(imgUrl(t.iconImage))}">`;
     if (type === 'url' && t.iconCache) return `<img class="${ctx === 'cell' ? 'cimg' : ''}" src="${esc(urlSrc(t))}">`;
+    if (type === 'ha' && t.value) {
+      // Trigger lazy state fetch (re-renders on completion) and lazy entity_picture caching.
+      if (!Object.prototype.hasOwnProperty.call(haStateCache, t.value)) ensureHaState(t.value);
+      if (!t.iconCache) ensureHaEntityPicture(t);
+      if (t.iconCache) return `<img class="${ctx === 'cell' ? 'cimg' : ''}" src="${esc(urlSrc(t))}">`;
+      const em = haResolveEmoji(t);
+      return ctx === 'cell' ? `<div class="ic">${esc(em)}</div>` : `<span class="em">${esc(em)}</span>`;
+    }
     if (type === 'app' && t.value) {
       const c = appIconCache[t.value];
       if (c) return `<img class="${ctx === 'cell' ? 'cimg' : ''}" src="${esc(c)}">`;
@@ -447,7 +551,15 @@
       <p class="hint">${typeHint(t.type)}</p>
     </div>`;
     document.getElementById('tLabel').oninput = e => { t.label = e.target.value; renderTiles(); markDirty(); };
-    document.getElementById('tType').onchange = e => { const prev = t.type; t.type = e.target.value; if (t.type === 'page' || prev === 'page' || t.type === 'ha' || prev === 'ha') { t.value = ''; t.service = ''; } if (t.type === 'macro' && !Array.isArray(t.steps)) t.steps = []; render(); markDirty(); };
+    document.getElementById('tType').onchange = e => {
+      const prev = t.type; t.type = e.target.value;
+      if (t.type === 'page' || prev === 'page' || t.type === 'ha' || prev === 'ha') { t.value = ''; t.service = ''; }
+      // Default HA entity tiles to the "HA icon" iconType so the resolved icon shows immediately
+      // without the user having to flip it manually.
+      if (t.type === 'ha' && (!t.iconType || t.iconType === 'emoji')) { t.iconType = 'ha'; t.iconCache = ''; t.iconUrl = ''; }
+      if (t.type === 'macro' && !Array.isArray(t.steps)) t.steps = [];
+      render(); markDirty();
+    };
     const tv = document.getElementById('tValue');
     if (tv) tv.oninput = e => { t.value = e.target.value; renderTiles(); renderIconPane(); markDirty(); };
     const tp = document.getElementById('tPage');
@@ -536,17 +648,27 @@
     if (!g || ti < 0) { el.innerHTML = ''; return; }
     const t = g.tiles[ti];
     if (iconTypeOf(t) === 'app' && t.type !== 'app') t.iconType = 'emoji';   // app icon only valid for App type
-    const type = iconTypeOf(t), appOk = t.type === 'app';
+    if (iconTypeOf(t) === 'ha' && t.type !== 'ha') t.iconType = 'emoji';     // HA icon only valid for HA entity tiles
+    const type = iconTypeOf(t), appOk = t.type === 'app', haOk = t.type === 'ha';
     el.innerHTML = `<div class="iconbox">
       <p class="sectitle">Icon</p>
       <label class="iconopt"><input type="radio" name="ic" value="emoji" ${type === 'emoji' ? 'checked' : ''}> Emoji</label>
       <label class="iconopt ${appOk ? '' : 'disabled'}"><input type="radio" name="ic" value="app" ${type === 'app' ? 'checked' : ''} ${appOk ? '' : 'disabled'}> App icon ${appOk ? '' : '<span class="note">(set Type = App)</span>'}</label>
+      <label class="iconopt ${haOk ? '' : 'disabled'}"><input type="radio" name="ic" value="ha" ${type === 'ha' ? 'checked' : ''} ${haOk ? '' : 'disabled'}> HA icon ${haOk ? '' : '<span class="note">(set Type = HA entity)</span>'}</label>
       <label class="iconopt"><input type="radio" name="ic" value="image" ${type === 'image' ? 'checked' : ''}> Image</label>
       <label class="iconopt"><input type="radio" name="ic" value="url" ${type === 'url' ? 'checked' : ''}> Image URL</label>
       <div class="icondetail" id="icondetail"></div>
       <div class="iconpreview" id="iconpreview"></div>
     </div>`;
-    el.querySelectorAll('input[name=ic]').forEach(r => r.onchange = e => { t.iconType = e.target.value; renderIconPane(); renderTiles(); markDirty(); });
+    el.querySelectorAll('input[name=ic]').forEach(r => r.onchange = e => {
+      const prev = t.iconType;
+      t.iconType = e.target.value;
+      // Switching INTO 'ha' clears any prior cached URL icon so we don't render a stale user-set
+      // image as if it were the HA icon. Switching AWAY keeps t.iconCache/iconUrl -- they're
+      // harmless for emoji/app and useful if the user later picks 'url' or 'image'.
+      if (t.iconType === 'ha' && prev !== 'ha') { t.iconCache = ''; t.iconUrl = ''; }
+      renderIconPane(); renderTiles(); markDirty();
+    });
     renderIconDetail(t);
     renderIconPreview(t);
   }
@@ -560,6 +682,23 @@
     } else if (type === 'app') {
       el.innerHTML = `<p class="hint">${t.value ? 'Uses this program’s own icon: <b>' + esc(t.value) + '</b>' : 'Set a program in Value first.'}</p>`;
       if (t.value) ensureAppIcon(t.value);
+    } else if (type === 'ha') {
+      const reg = (haCacheLocal && haCacheLocal.entityRegistry || []).find(r => r.entity_id === t.value);
+      const state = haStateCache[t.value];
+      const liveIcon = (typeof state === 'object' && state && state.attributes && state.attributes.icon) || null;
+      const regIcon = reg && reg.icon || null;
+      const hasPic = !!(typeof state === 'object' && state && state.attributes && state.attributes.entity_picture);
+      let body = '';
+      if (!t.value) body = 'Pick an HA entity above first.';
+      else {
+        const bits = [];
+        if (hasPic) bits.push('using the entity\'s picture');
+        else if (liveIcon || regIcon) bits.push('mapped from <b>' + esc(liveIcon || regIcon) + '</b>');
+        else bits.push('fallback for domain <b>' + esc((t.value.split('.')[0]) || '') + '</b>');
+        body = 'Uses Home Assistant\'s icon for <b>' + esc(t.value) + '</b> — ' + bits.join(', ') + '.' +
+          ((liveIcon || regIcon) && !hasPic ? ' <span class="hint">(MDI names render as emoji approximations today; pixel-accurate MDI rendering is a later phase.)</span>' : '');
+      }
+      el.innerHTML = `<p class="hint">${body}</p>`;
     } else if (type === 'image') {
       el.innerHTML = `<div class="row"><input id="tImage" value="${esc(t.iconImage)}" placeholder="path to an image" readonly><button id="tImgBrowse">Browse…</button></div>`;
       document.getElementById('tImgBrowse').onclick = async () => { const p = await configApi.pickImage(); if (p) { t.iconImage = p; renderIconDetail(t); renderIconPreview(t); renderTiles(); markDirty(); } };
@@ -588,6 +727,11 @@
     if (type === 'image' && t.iconImage) el.innerHTML = `<img src="${esc(imgUrl(t.iconImage))}">`;
     else if (type === 'url' && t.iconCache) el.innerHTML = `<img src="${esc(urlSrc(t))}">`;
     else if (type === 'url') el.innerHTML = `<span class="none">fetch an image URL to preview</span>`;
+    else if (type === 'ha' && t.value) {
+      if (t.iconCache) el.innerHTML = `<img src="${esc(urlSrc(t))}">`;
+      else el.innerHTML = `<span class="em">${esc(haResolveEmoji(t))}</span>`;
+    }
+    else if (type === 'ha') el.innerHTML = `<span class="none">pick an HA entity to preview</span>`;
     else if (type === 'app' && t.value) {
       const c = appIconCache[t.value];
       if (c) el.innerHTML = `<img src="${esc(c)}">`;
@@ -709,8 +853,11 @@
       refreshServiceList(); refreshStar();
       // Helpful default: stamp the friendly name as the tile label if the user hasn't named it.
       if (!t.label) { t.label = (entities.find(x => x.entityId === t.value) || {}).friendlyName || t.value; document.getElementById('tLabel').value = t.label; }
+      // If the user is using the HA icon, drop the prior entity's cached picture so the new
+      // entity's picture (or emoji) takes over on the next render.
+      if (t.iconType === 'ha') { t.iconCache = ''; t.iconUrl = ''; delete haStateCache[t.value]; }
       renderTiles(); renderIconPane(); markDirty();
-      loadEntityIconHint(t).catch(() => {});                          // background: surface HA icon + auto-set entity_picture
+      loadEntityIconHint(t).catch(() => {});                          // background: surface HA icon hint
     };
     svcSel.onchange = e => { t.service = e.target.value; markDirty(); };
     starBtn.onclick = () => { haToggleFavorite(t.value); refreshStar(); if (favBox.checked) populate(); };
@@ -722,40 +869,27 @@
     if (t.value) loadEntityIconHint(t).catch(() => {});               // pre-load on first render so the hint shows immediately
   }
 
-  // Lazy-fetch the picked entity's state to surface its HA icon name (mdi:...) and auto-set
-  // entity_picture as the tile's URL icon when the user hasn't picked their own. Errors are
-  // swallowed — this is a nice-to-have, not load-bearing.
+  // Surface the picked entity's HA icon name (mdi:...) and any entity_picture presence as a hint
+  // line in the picker. Also pre-populates haStateCache so iconHtml resolves immediately on first
+  // render. Doesn't overwrite the user's icon choice -- the iconType='ha' path owns auto-resolution.
   async function loadEntityIconHint(t) {
     const hintEl = document.getElementById('haIconHint'); if (!hintEl) return;
     hintEl.textContent = '';
-    const startedFor = t.value;                                       // guard against the user changing entity mid-fetch
+    const startedFor = t.value;
     if (!startedFor) return;
     let s;
     try { s = await configApi.fetchHaEntityState(startedFor); } catch (e) { return; }
     if (t.value !== startedFor) return;
     if (!s || s.error) return;
+    haStateCache[startedFor] = s;                                     // share the result with iconHtml
     const attrs = s.attributes || {};
-    const ha = ((config.settings || {}).haAuth) || {};
     const parts = [];
-    if (typeof attrs.icon === 'string' && attrs.icon) parts.push('HA icon: ' + attrs.icon + ' (rendered in phase 2)');
-    const pic = attrs.entity_picture;
-    // Only auto-set the entity picture when the tile has no user-chosen icon yet. Once the user
-    // has picked an image / URL / app icon explicitly, leave it alone.
-    if (typeof pic === 'string' && pic && (!t.iconType || t.iconType === 'emoji') && !t.iconUrl && !t.iconImage) {
-      const fullUrl = /^https?:\/\//i.test(pic) ? pic : (ha.url || '').replace(/\/+$/, '') + (pic.startsWith('/') ? pic : '/' + pic);
-      if (/^https?:\/\//i.test(fullUrl)) {
-        try {
-          const r = await configApi.fetchIconUrl(fullUrl);
-          if (t.value !== startedFor) return;                         // entity changed during the fetch
-          if (r && r.ok) {
-            t.iconType = 'url'; t.iconUrl = fullUrl; t.iconCache = r.cachePath;
-            renderTiles(); renderIconPane(); markDirty();
-            parts.push('entity picture auto-loaded');
-          }
-        } catch (e) {}
-      }
-    }
+    if (typeof attrs.icon === 'string' && attrs.icon) parts.push('HA icon: ' + attrs.icon);
+    if (typeof attrs.entity_picture === 'string' && attrs.entity_picture) parts.push('entity picture available');
     hintEl.textContent = parts.join(' · ');
+    // If the user is on "HA icon" and the state has an entity_picture, kick the fetch so iconHtml
+    // renders the image instead of the emoji fallback on the next render.
+    if (t.iconType === 'ha') { ensureHaEntityPicture(t); renderTiles(); renderIconPreview(t); }
   }
 
   // ---- dashboard page (web) ----
@@ -1303,7 +1437,13 @@
         // (ipc.invoke) reaches main's handler.
         if (dirty) { statusEl.textContent = 'Saving, then refreshing…'; statusEl.style.color = '#7e93ab'; doSave(); }
         else { statusEl.textContent = 'Refreshing…'; statusEl.style.color = '#7e93ab'; }
-        try { showStatus(await configApi.refreshHaCache()); }
+        try {
+          const c = await configApi.refreshHaCache();
+          haCacheLocal = c;                                           // keep iconHtml in sync with main
+          Object.keys(haStateCache).forEach(k => delete haStateCache[k]);   // states may have changed; force re-fetch on next render
+          showStatus(c);
+          renderTiles();                                              // any HA-icon tiles re-resolve with the new data
+        }
         catch (e) { statusEl.textContent = 'Refresh failed: ' + (e.message || e); statusEl.style.color = '#c98'; }
         finally { refBtn.disabled = !useBox.checked; }
       };
@@ -1425,5 +1565,6 @@
   (async () => {
     config = await configApi.getConfig(); if (!config.grids) config.grids = [];
     try { appDefs = await configApi.getApps(); } catch (e) {}
+    try { haCacheLocal = await configApi.getHaCache(); } catch (e) {}   // for iconHtml's HA icon resolution
     render(); setState('');
   })();
