@@ -641,6 +641,7 @@
       <div class="row"><label>Entity</label>
         <select id="haEntity" size="8" style="flex:1; font-family:monospace; font-size:12px"></select>
         <button id="haStar" type="button" title="Toggle favorite" style="margin-left:6px">☆</button></div>
+      <p class="hint" id="haIconHint" style="margin:2px 0 0; min-height:18px"></p>
       <div class="row"><label>Service</label><select id="haService" style="flex:1"></select></div>
       <p class="hint" id="haTileStatus" style="margin:4px 0 0">Loading entities…</p>
     </div>`;
@@ -709,6 +710,7 @@
       // Helpful default: stamp the friendly name as the tile label if the user hasn't named it.
       if (!t.label) { t.label = (entities.find(x => x.entityId === t.value) || {}).friendlyName || t.value; document.getElementById('tLabel').value = t.label; }
       renderTiles(); renderIconPane(); markDirty();
+      loadEntityIconHint(t).catch(() => {});                          // background: surface HA icon + auto-set entity_picture
     };
     svcSel.onchange = e => { t.service = e.target.value; markDirty(); };
     starBtn.onclick = () => { haToggleFavorite(t.value); refreshStar(); if (favBox.checked) populate(); };
@@ -717,6 +719,43 @@
     labelSel.onchange = populate;
     favBox.onchange = populate;
     populate();
+    if (t.value) loadEntityIconHint(t).catch(() => {});               // pre-load on first render so the hint shows immediately
+  }
+
+  // Lazy-fetch the picked entity's state to surface its HA icon name (mdi:...) and auto-set
+  // entity_picture as the tile's URL icon when the user hasn't picked their own. Errors are
+  // swallowed — this is a nice-to-have, not load-bearing.
+  async function loadEntityIconHint(t) {
+    const hintEl = document.getElementById('haIconHint'); if (!hintEl) return;
+    hintEl.textContent = '';
+    const startedFor = t.value;                                       // guard against the user changing entity mid-fetch
+    if (!startedFor) return;
+    let s;
+    try { s = await configApi.fetchHaEntityState(startedFor); } catch (e) { return; }
+    if (t.value !== startedFor) return;
+    if (!s || s.error) return;
+    const attrs = s.attributes || {};
+    const ha = ((config.settings || {}).haAuth) || {};
+    const parts = [];
+    if (typeof attrs.icon === 'string' && attrs.icon) parts.push('HA icon: ' + attrs.icon + ' (rendered in phase 2)');
+    const pic = attrs.entity_picture;
+    // Only auto-set the entity picture when the tile has no user-chosen icon yet. Once the user
+    // has picked an image / URL / app icon explicitly, leave it alone.
+    if (typeof pic === 'string' && pic && (!t.iconType || t.iconType === 'emoji') && !t.iconUrl && !t.iconImage) {
+      const fullUrl = /^https?:\/\//i.test(pic) ? pic : (ha.url || '').replace(/\/+$/, '') + (pic.startsWith('/') ? pic : '/' + pic);
+      if (/^https?:\/\//i.test(fullUrl)) {
+        try {
+          const r = await configApi.fetchIconUrl(fullUrl);
+          if (t.value !== startedFor) return;                         // entity changed during the fetch
+          if (r && r.ok) {
+            t.iconType = 'url'; t.iconUrl = fullUrl; t.iconCache = r.cachePath;
+            renderTiles(); renderIconPane(); markDirty();
+            parts.push('entity picture auto-loaded');
+          }
+        } catch (e) {}
+      }
+    }
+    hintEl.textContent = parts.join(' · ');
   }
 
   // ---- dashboard page (web) ----
