@@ -559,10 +559,102 @@ function sweepIconCache() {
   for (const f of files) { if (!used.has(f)) { try { fs.unlinkSync(path.join(ICON_CACHE_DIR, f)); removed++; } catch (e) {} } }
   if (removed) console.log('icon cache: removed ' + removed + ' orphaned file(s)');
 }
+// HA's frontend domain-default MDI icons (mirror of FIXED_DOMAIN_ICONS in
+// home-assistant/frontend/src/common/const.ts). When an entity has no explicit icon override,
+// the editor and the panel both use this to pick the same glyph HA would have drawn.
+const HA_DOMAIN_DEFAULT_MDI = {
+  air_quality: 'air-filter', alert: 'alert', automation: 'robot',
+  calendar: 'calendar', camera: 'video', climate: 'thermostat',
+  configurator: 'cog', conversation: 'microphone-message', counter: 'counter',
+  date: 'calendar', datetime: 'calendar-clock', demo: 'home-assistant',
+  google_assistant: 'google-assistant', group: 'google-circles-communities',
+  homeassistant: 'home-assistant', homekit: 'home-automation',
+  image_processing: 'image-filter-frames', image: 'image',
+  input_boolean: 'toggle-switch-variant', input_button: 'button-pointer',
+  input_datetime: 'calendar-clock', input_number: 'ray-vertex',
+  input_select: 'format-list-bulleted', input_text: 'form-textbox',
+  lawn_mower: 'robot-mower', light: 'lightbulb', mailbox: 'mailbox',
+  notify: 'comment-alert', number: 'ray-vertex',
+  persistent_notification: 'bell', person: 'account', plant: 'flower',
+  proximity: 'apple-safari', remote: 'remote',
+  scene: 'palette', schedule: 'calendar-clock', script: 'script-text',
+  select: 'format-list-bulleted', sensor: 'eye', binary_sensor: 'eye',
+  simple_alarm: 'bell', siren: 'bullhorn', stt: 'microphone-message',
+  sun: 'white-balance-sunny', switch: 'toggle-switch-variant',
+  text: 'form-textbox', time: 'clock', timer: 'timer-outline',
+  todo: 'clipboard-list', tts: 'speaker-message', vacuum: 'robot-vacuum',
+  wake_word: 'chat-sleep', weather: 'weather-partly-cloudy', zone: 'map-marker-radius',
+  cover: 'window-shutter', lock: 'lock', fan: 'fan',
+  media_player: 'cast', alarm_control_panel: 'shield', water_heater: 'water-pump',
+  device_tracker: 'crosshairs-gps',
+};
+// Strip the "mdi:" prefix and return just the icon name (or null if not a valid mdi reference).
+function bareMdi(name) {
+  if (typeof name !== 'string') return null;
+  const m = /^mdi:([a-z0-9-]+)$/i.exec(name.trim());
+  return m ? m[1].toLowerCase() : null;
+}
+// Pick the MDI icon name an entity should render with: explicit registry override > domain default.
+// State.attributes.icon would be a third source but main keeps states sparse (lazy), so we don't
+// rely on it here -- editor pre-warms states for tiles the user is editing.
+function haEntityMdi(entityId) {
+  if (haCache && Array.isArray(haCache.entityRegistry)) {
+    const reg = haCache.entityRegistry.find(r => r.entity_id === entityId);
+    const bare = bareMdi(reg && reg.icon);
+    if (bare) return bare;
+  }
+  return HA_DOMAIN_DEFAULT_MDI[(entityId || '').split('.')[0] || ''] || null;
+}
+
+const MDI_CDN_BASE = 'https://cdn.jsdelivr.net/npm/@mdi/svg@7/svg/';
+const MDI_MAX_BYTES = 200 * 1024;
+const mdiInFlight = {};   // bareName -> Promise (coalesces concurrent fetches of the same icon)
+// Download an MDI icon's SVG from jsDelivr, recolor it white so it renders on the dark panel and
+// editor backgrounds, cache it in the icon-cache dir keyed by name. Idempotent: returns the
+// cached file if already present. The recolor injects fill="#ffffff" onto the root <svg> element
+// so child paths without explicit fill inherit it (which is how every MDI icon is shaped).
+function fetchMdiToCache(name) {
+  const bare = bareMdi('mdi:' + (name || '')) || bareMdi(name);
+  if (!bare) return Promise.resolve({ ok: false, error: 'invalid mdi name' });
+  const file = path.join(ICON_CACHE_DIR, 'mdi-' + bare + '.svg');
+  try { if (fs.existsSync(file)) return Promise.resolve({ ok: true, cachePath: file, dataUrl: 'data:image/svg+xml;base64,' + fs.readFileSync(file).toString('base64') }); }
+  catch (e) {}
+  if (mdiInFlight[bare]) return mdiInFlight[bare];
+  const url = MDI_CDN_BASE + bare + '.svg';
+  mdiInFlight[bare] = new Promise(resolve => {
+    let req;
+    try { req = net.request({ url, redirect: 'follow' }); }
+    catch (e) { delete mdiInFlight[bare]; return resolve({ ok: false, error: 'invalid url' }); }
+    req.setHeader('User-Agent', 'open-quake/' + app.getVersion());
+    req.setHeader('Accept', 'image/svg+xml');
+    let done = false;
+    const finish = result => { if (done) return; done = true; delete mdiInFlight[bare]; resolve(result); };
+    req.on('error', () => finish({ ok: false, error: 'CDN unreachable' }));
+    req.on('response', resp => {
+      if (resp.statusCode !== 200) { resp.resume(); return finish({ ok: false, error: 'CDN ' + resp.statusCode }); }
+      const chunks = []; let total = 0;
+      resp.on('data', d => { total += d.length; if (total > MDI_MAX_BYTES) { try { req.abort(); } catch (e) {} return finish({ ok: false, error: 'svg too large' }); } chunks.push(d); });
+      resp.on('end', () => {
+        if (done) return;
+        const svg = Buffer.concat(chunks).toString('utf8');
+        if (!/<svg\b/i.test(svg)) return finish({ ok: false, error: 'not an svg' });
+        const recolored = svg.replace(/<svg\b/i, '<svg fill="#ffffff"');
+        try { fs.mkdirSync(ICON_CACHE_DIR, { recursive: true }); } catch (e) {}
+        try { fs.writeFileSync(file, recolored, 'utf8'); }
+        catch (e) { return finish({ ok: false, error: 'cache write failed' }); }
+        finish({ ok: true, cachePath: file, dataUrl: 'data:image/svg+xml;base64,' + Buffer.from(recolored).toString('base64') });
+      });
+    });
+    req.end();
+  });
+  return mdiInFlight[bare];
+}
+
 // Emoji approximations for the most common Home Assistant MDI icon names + per-domain fallbacks.
-// Mirrors the renderer-side table in config.js so HA entity tiles render the same icon on the
-// panel as in the editor preview. Pattern matching is exact-or-hyphenated (so "mdi:lockable"
-// never falsely matches "mdi:lock"), order is most-specific first.
+// Used ONLY as a last-resort when the CDN is unreachable or returns a non-svg. The actual icon is
+// the real MDI SVG fetched + recolored via fetchMdiToCache; this is just so a tile never renders
+// blank if jsDelivr is down. Pattern matching is exact-or-hyphenated (so "mdi:lockable" never
+// falsely matches "mdi:lock"), order is most-specific first.
 const HA_MDI_EMOJI = [
   ['mdi:weather-sunny', '☀️'], ['mdi:weather-cloudy', '☁️'], ['mdi:weather-rainy', '🌧️'],
   ['mdi:weather-pouring', '🌧️'], ['mdi:weather-snowy', '❄️'], ['mdi:weather-night', '🌙'],
@@ -623,10 +715,21 @@ async function resolveTiles(tiles) {
     }
     else if (t.iconType === 'url' && t.iconCache) { out.iconSrc = imageFileToDataUrl(t.iconCache); }   // cached download -> data URL; null (gone) -> emoji fallback
     else if (t.iconType === 'ha' && t.value) {
-      // HA entity tile: editor cached the entity_picture into t.iconCache (when available) via the
-      // same fetchIconToCache pipeline as URL icons. Otherwise stamp an emoji approximation onto
-      // out.icon so the panel's text-icon path renders it instead of the generic ▫️ placeholder.
+      // HA entity tile resolution order:
+      //   1. t.iconCache (entity_picture cached by the editor) — render as image.
+      //   2. The entity's MDI icon (registry override -> HA's domain default), fetched from
+      //      jsDelivr and cached as a recolored SVG — render as image.
+      //   3. Emoji fallback (table mirror of config.js) — only if jsDelivr is unreachable.
       if (t.iconCache) { out.iconSrc = imageFileToDataUrl(t.iconCache); }
+      if (!out.iconSrc) {
+        const mdi = haEntityMdi(t.value);
+        if (mdi) {
+          try {
+            const r = await fetchMdiToCache(mdi);
+            if (r && r.ok && r.dataUrl) out.iconSrc = r.dataUrl;
+          } catch (e) {}
+        }
+      }
       if (!out.iconSrc && !out.icon) out.icon = haEntityEmoji(t.value);
     }
     else if (t.iconType === 'app') { const d = await getAppIconDataUrl(t.value); if (d) out.iconSrc = d; }
@@ -1244,6 +1347,7 @@ app.whenReady().then(async () => {
   // so it can't touch fs). Same conversion the panel uses, so editor previews match the panel.
   ipcMain.on('imageToDataUrl', (e, filePath) => { e.returnValue = isFrom(e, configWin) ? (imageFileToDataUrl(filePath) || '') : ''; });
   ipcMain.handle('fetchIconUrl', (e, url) => isFrom(e, configWin) ? fetchIconToCache(url) : { ok: false, error: 'unauthorized' });
+  ipcMain.handle('fetchMdiIcon', (e, name) => isFrom(e, configWin) ? fetchMdiToCache(name) : { ok: false, error: 'unauthorized' });
 
   ipcMain.handle('saveLightingToDevice', (e) => { if (!isFrom(e, configWin)) return false; try { return dev.saveLighting(); } catch (er) { return false; } });
 

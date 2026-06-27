@@ -126,6 +126,71 @@
   }
   function haDomainEmoji(domain) { return HA_DOMAIN_EMOJI[domain] || '🏠'; }
 
+  // HA's frontend domain-default MDI icons (mirror of FIXED_DOMAIN_ICONS in
+  // home-assistant/frontend/src/common/const.ts). Used when an entity has no explicit override
+  // -- picks the same glyph HA's UI would draw. Same table as main.js.
+  const HA_DOMAIN_DEFAULT_MDI = {
+    air_quality: 'air-filter', alert: 'alert', automation: 'robot',
+    calendar: 'calendar', camera: 'video', climate: 'thermostat',
+    configurator: 'cog', conversation: 'microphone-message', counter: 'counter',
+    date: 'calendar', datetime: 'calendar-clock', demo: 'home-assistant',
+    google_assistant: 'google-assistant', group: 'google-circles-communities',
+    homeassistant: 'home-assistant', homekit: 'home-automation',
+    image_processing: 'image-filter-frames', image: 'image',
+    input_boolean: 'toggle-switch-variant', input_button: 'button-pointer',
+    input_datetime: 'calendar-clock', input_number: 'ray-vertex',
+    input_select: 'format-list-bulleted', input_text: 'form-textbox',
+    lawn_mower: 'robot-mower', light: 'lightbulb', mailbox: 'mailbox',
+    notify: 'comment-alert', number: 'ray-vertex',
+    persistent_notification: 'bell', person: 'account', plant: 'flower',
+    proximity: 'apple-safari', remote: 'remote',
+    scene: 'palette', schedule: 'calendar-clock', script: 'script-text',
+    select: 'format-list-bulleted', sensor: 'eye', binary_sensor: 'eye',
+    simple_alarm: 'bell', siren: 'bullhorn', stt: 'microphone-message',
+    sun: 'white-balance-sunny', switch: 'toggle-switch-variant',
+    text: 'form-textbox', time: 'clock', timer: 'timer-outline',
+    todo: 'clipboard-list', tts: 'speaker-message', vacuum: 'robot-vacuum',
+    wake_word: 'chat-sleep', weather: 'weather-partly-cloudy', zone: 'map-marker-radius',
+    cover: 'window-shutter', lock: 'lock', fan: 'fan',
+    media_player: 'cast', alarm_control_panel: 'shield', water_heater: 'water-pump',
+    device_tracker: 'crosshairs-gps',
+  };
+  function bareMdi(name) {
+    if (typeof name !== 'string') return null;
+    const m = /^mdi:([a-z0-9-]+)$/i.exec(name.trim());
+    return m ? m[1].toLowerCase() : null;
+  }
+  // Pick the MDI icon name an HA entity tile should render with:
+  //   1. Live state.attributes.icon (e.g. a light that swaps icon based on its state).
+  //   2. entity_registry override.
+  //   3. HA's domain default.
+  function haEntityMdiName(t) {
+    if (!t || !t.value) return null;
+    const state = haStateCache[t.value];
+    if (typeof state === 'object' && state && state.attributes) {
+      const b = bareMdi(state.attributes.icon);
+      if (b) return b;
+    }
+    if (haCacheLocal && Array.isArray(haCacheLocal.entityRegistry)) {
+      const reg = haCacheLocal.entityRegistry.find(r => r.entity_id === t.value);
+      const b = bareMdi(reg && reg.icon);
+      if (b) return b;
+    }
+    return HA_DOMAIN_DEFAULT_MDI[(t.value || '').split('.')[0] || ''] || null;
+  }
+  // Per-renderer cache of MDI fetch results so iconHtml doesn't kick a fetch for every render.
+  // Keyed by bare MDI name. Values: a Promise-shaped record { ok, cachePath } (resolved) or null
+  // (in-flight). On resolve, render() is called so iconHtml picks up the cached path.
+  const mdiCache = {};
+  function ensureMdi(name) {
+    if (!name || Object.prototype.hasOwnProperty.call(mdiCache, name)) return;
+    mdiCache[name] = null;
+    configApi.fetchMdiIcon(name).then(r => {
+      mdiCache[name] = (r && r.ok) ? r : false;
+      render();
+    }).catch(() => { mdiCache[name] = false; render(); });
+  }
+
   // Local mirrors of main's haCache + per-entity states. Loaded on init, refreshed when the user
   // clicks Refresh in the Auth tab. iconHtml needs synchronous access, so we keep these here.
   let haCacheLocal = null;
@@ -345,6 +410,14 @@
       if (!Object.prototype.hasOwnProperty.call(haStateCache, t.value)) ensureHaState(t.value);
       if (!t.iconCache) ensureHaEntityPicture(t);
       if (t.iconCache) return `<img class="${ctx === 'cell' ? 'cimg' : ''}" src="${esc(urlSrc(t))}">`;
+      // No entity_picture -- resolve the MDI icon name and render the real SVG (recolored white)
+      // fetched from jsDelivr. Emoji is only the last-resort fallback if jsDelivr is unreachable.
+      const mdi = haEntityMdiName(t);
+      if (mdi) {
+        const cached = mdiCache[mdi];
+        if (cached === undefined) ensureMdi(mdi);
+        if (cached && cached.ok && cached.dataUrl) return `<img class="${ctx === 'cell' ? 'cimg' : ''}" src="${esc(cached.dataUrl)}">`;
+      }
       const em = haResolveEmoji(t);
       return ctx === 'cell' ? `<div class="ic">${esc(em)}</div>` : `<span class="em">${esc(em)}</span>`;
     }
@@ -688,16 +761,14 @@
       const liveIcon = (typeof state === 'object' && state && state.attributes && state.attributes.icon) || null;
       const regIcon = reg && reg.icon || null;
       const hasPic = !!(typeof state === 'object' && state && state.attributes && state.attributes.entity_picture);
+      const mdi = !hasPic ? haEntityMdiName(t) : null;
+      const cached = mdi ? mdiCache[mdi] : null;
+      const fellBackToEmoji = !!(mdi && cached && !cached.ok);
       let body = '';
       if (!t.value) body = 'Pick an HA entity above first.';
-      else {
-        const bits = [];
-        if (hasPic) bits.push('using the entity\'s picture');
-        else if (liveIcon || regIcon) bits.push('mapped from <b>' + esc(liveIcon || regIcon) + '</b>');
-        else bits.push('fallback for domain <b>' + esc((t.value.split('.')[0]) || '') + '</b>');
-        body = 'Uses Home Assistant\'s icon for <b>' + esc(t.value) + '</b> — ' + bits.join(', ') + '.' +
-          ((liveIcon || regIcon) && !hasPic ? ' <span class="hint">(MDI names render as emoji approximations today; pixel-accurate MDI rendering is a later phase.)</span>' : '');
-      }
+      else if (hasPic) body = "Uses Home Assistant's icon for <b>" + esc(t.value) + '</b> — the entity\'s picture.';
+      else if (mdi) body = "Uses Home Assistant's icon for <b>" + esc(t.value) + '</b> — <code>mdi:' + esc(mdi) + '</code>' + (liveIcon || regIcon ? ' (from ' + (liveIcon ? 'state' : 'registry') + ')' : ' (domain default)') + (fellBackToEmoji ? ' <span class="hint">— couldn\'t reach jsDelivr; showing emoji fallback.</span>' : '');
+      else body = 'No icon mapping for this entity — showing an emoji placeholder.';
       el.innerHTML = `<p class="hint">${body}</p>`;
     } else if (type === 'image') {
       el.innerHTML = `<div class="row"><input id="tImage" value="${esc(t.iconImage)}" placeholder="path to an image" readonly><button id="tImgBrowse">Browse…</button></div>`;
@@ -729,7 +800,12 @@
     else if (type === 'url') el.innerHTML = `<span class="none">fetch an image URL to preview</span>`;
     else if (type === 'ha' && t.value) {
       if (t.iconCache) el.innerHTML = `<img src="${esc(urlSrc(t))}">`;
-      else el.innerHTML = `<span class="em">${esc(haResolveEmoji(t))}</span>`;
+      else {
+        const mdi = haEntityMdiName(t);
+        const cached = mdi ? mdiCache[mdi] : null;
+        if (cached && cached.ok && cached.dataUrl) el.innerHTML = `<img src="${esc(cached.dataUrl)}">`;
+        else { if (mdi) ensureMdi(mdi); el.innerHTML = `<span class="em">${esc(haResolveEmoji(t))}</span>`; }
+      }
     }
     else if (type === 'ha') el.innerHTML = `<span class="none">pick an HA entity to preview</span>`;
     else if (type === 'app' && t.value) {
