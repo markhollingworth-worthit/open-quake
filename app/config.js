@@ -710,6 +710,7 @@
 
     // Music groups its three panels (album art / lyrics / button grid) in one box, capped at 2 on.
     const isMusic = g.app === 'music';
+    const isHaDash = g.app === 'ha-dashboard';
     const musicBox = `<fieldset style="border:1px solid #2a3a4e; border-radius:8px; padding:6px 14px 10px; margin:10px 0">
         <legend style="padding:0 6px; color:#9fb3c8; font-size:13px">Panels</legend>
         <div><label class="iconopt" style="width:auto"><input type="checkbox" id="pArt" ${optVal(g, 'art', true) ? 'checked' : ''}> Show album art</label></div>
@@ -717,7 +718,17 @@
         <div><label class="iconopt" style="width:auto"><input type="checkbox" id="gGrid" ${g.gridOn ? 'checked' : ''}> Buttons (grid)</label></div>
         <p class="hint" style="margin:6px 0 0">Only two may be checked at once (screen space). Grid size/tiles are on the <b>Buttons</b> tab.</p>
       </fieldset>`;
-    const optsBlock = isMusic ? musicBox : ('<div id="appOpts"></div>' + (canGrid ? `<div class="row" style="margin-top:10px"><label style="width:auto">Buttons</label>
+    // HA Dashboard: dashboard picker (fetched from HA on render), then the standard Buttons toggle.
+    const curDash = (g.options && g.options.dashboard) || 'lovelace';
+    const haBox = `<div id="haDashBox" style="margin-top:10px">
+        <div class="row"><label>Dashboard</label>
+          <select id="haDashSel" style="flex:1"><option value="${esc(curDash)}" selected>${esc(curDash)} (current)</option></select>
+          <button id="haDashRefresh" type="button" title="Reload from HA">Refresh</button></div>
+        <p class="hint" id="haDashMsg" style="margin:4px 0 0">Loading dashboards…</p>
+      </div>` + (canGrid ? `<div class="row" style="margin-top:10px"><label style="width:auto">Buttons</label>
+        <label class="iconopt" style="width:auto; white-space:nowrap"><input type="checkbox" id="gGrid" ${g.gridOn ? 'checked' : ''}> Add a button grid beside the app</label></div>
+      <p class="hint">Adds a strip of launcher tiles beside the app — pick the side, size, and tiles on the <b>Buttons</b> tab that appears.</p>` : '');
+    const optsBlock = isMusic ? musicBox : isHaDash ? haBox : ('<div id="appOpts"></div>' + (canGrid ? `<div class="row" style="margin-top:10px"><label style="width:auto">Buttons</label>
         <label class="iconopt" style="width:auto; white-space:nowrap"><input type="checkbox" id="gGrid" ${g.gridOn ? 'checked' : ''}> Add a button grid beside the app</label></div>
       <p class="hint">Adds a strip of launcher tiles beside the app — pick the side, size, and tiles on the <b>Buttons</b> tab that appears.</p>` : ''));
     el.innerHTML = tabBar + `
@@ -746,6 +757,28 @@
     if (isMusic) {
       const pa = document.getElementById('pArt'); if (pa) pa.onchange = e => { if (!g.options) g.options = {}; g.options.art = e.target.checked; markDirty(); enforceMusicCap(g); };
       const pl = document.getElementById('pLyrics'); if (pl) pl.onchange = e => { if (!g.options) g.options = {}; g.options.lyrics = e.target.checked; markDirty(); enforceMusicCap(g); };
+    } else if (isHaDash) {
+      const sel = document.getElementById('haDashSel');
+      const msg = document.getElementById('haDashMsg');
+      const ref = document.getElementById('haDashRefresh');
+      const populate = async () => {
+        const ha = (config.settings || {}).haAuth || {};
+        if (!ha.url || !ha.token) { msg.textContent = 'Set HA URL and Long-Lived Access Token in the Auth tab first.'; msg.style.color = '#c98'; return; }
+        msg.textContent = 'Loading dashboards…'; msg.style.color = '#7e93ab';
+        try {
+          const list = await fetchHaDashboards(ha.url, ha.token);
+          // HA's lovelace/dashboards/list excludes the default Overview dashboard; prepend it so it's pickable.
+          const items = [{ url_path: 'lovelace', title: 'Overview (default)' }].concat(list.map(d => ({ url_path: d.url_path, title: d.title })));
+          const cur = (g.options && g.options.dashboard) || 'lovelace';
+          sel.innerHTML = items.map(it => `<option value="${esc(it.url_path)}" ${it.url_path === cur ? 'selected' : ''}>${esc(it.title || it.url_path)} (${esc(it.url_path)})</option>`).join('');
+          msg.textContent = items.length + ' dashboard' + (items.length === 1 ? '' : 's') + ' loaded.'; msg.style.color = '#7e93ab';
+        } catch (e) {
+          msg.textContent = 'Could not load dashboards: ' + (e.message || 'error'); msg.style.color = '#c98';
+        }
+      };
+      sel.onchange = e => { if (!g.options) g.options = {}; g.options.dashboard = e.target.value; markDirty(); };
+      ref.onclick = populate;
+      populate();
     } else {
       renderAppOpts(g, def);
     }
@@ -754,6 +787,37 @@
   }
   // Music: only 2 of {button grid, album art, lyrics} fit at once. Disable the unchecked third.
   function optVal(g, key, dflt) { const o = g.options || {}; return (key in o) ? o[key] : dflt; }
+  // Fetch the user's Lovelace dashboards from a Home Assistant server over its WebSocket API. Runs
+  // entirely in the editor renderer (the global haAuth token is already in the decrypted in-memory
+  // config). Resolves with the raw lovelace/dashboards/list result (default "Overview" not included --
+  // HA doesn't return it, the caller prepends it).
+  function fetchHaDashboards(haUrl, token) {
+    return new Promise((resolve, reject) => {
+      let wsHref;
+      try {
+        const u = new URL(haUrl);
+        u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
+        u.pathname = u.pathname.replace(/\/+$/, '') + '/api/websocket';
+        wsHref = u.href;
+      } catch (e) { return reject(new Error('invalid HA URL')); }
+      let done = false;
+      let ws;
+      try { ws = new WebSocket(wsHref); } catch (e) { return reject(new Error('could not open WebSocket')); }
+      const finish = (err, result) => { if (done) return; done = true; clearTimeout(to); try { ws.close(); } catch (e) {} err ? reject(err) : resolve(result); };
+      const to = setTimeout(() => finish(new Error('timed out talking to HA')), 8000);
+      ws.onerror = () => finish(new Error('connection failed (check URL and that HA is reachable)'));
+      ws.onmessage = ev => {
+        let msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
+        if (msg.type === 'auth_required') ws.send(JSON.stringify({ type: 'auth', access_token: token }));
+        else if (msg.type === 'auth_invalid') finish(new Error('token rejected by HA: ' + (msg.message || 'auth invalid')));
+        else if (msg.type === 'auth_ok') ws.send(JSON.stringify({ id: 1, type: 'lovelace/dashboards/list' }));
+        else if (msg.type === 'result' && msg.id === 1) {
+          if (msg.success) finish(null, Array.isArray(msg.result) ? msg.result : []);
+          else finish(new Error('dashboards list failed: ' + ((msg.error || {}).message || 'unknown')));
+        }
+      };
+    });
+  }
   function musicPanels(g) { return { grid: !!g.gridOn, art: !!optVal(g, 'art', true), lyrics: !!optVal(g, 'lyrics', false) }; }
   function enforceMusicCap(g) {
     if (!g || g.app !== 'music') return;

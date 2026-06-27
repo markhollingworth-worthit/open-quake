@@ -580,8 +580,19 @@ async function resolveGridIcons(grid) {
   const knob = effectiveKnob(grid);   // resolved from the ORIGINAL kind (apps get converted to 'web' below)
   let out;
   if (grid.kind === 'app') {                                                                          // render the local app in the webview; themed:true -> panel injects live light/dark + accent
-    const base = { ...grid, kind: 'web', url: appPageUrl(grid), themed: true };
-    out = grid.gridOn ? { ...base, tiles: await resolveTiles(grid.tiles) } : base;                    // file/app pages with the native button strip -> resolve its tile icons
+    if (grid.app === 'ha-dashboard') {
+      // Special-case: translate to a synthetic web dashboard using the global HA creds + the picked dashboard
+      // path. Reuses the existing dashboard webview render (incl. localStorage token injection for sign-in
+      // persistence). themed:false because HA themes itself.
+      const ha = (config.settings || {}).haAuth || {};
+      const baseUrl = String(ha.url || '').replace(/\/+$/, '');
+      const dash = String((grid.options || {}).dashboard || 'lovelace').replace(/^\/+/, '');
+      const synthetic = { ...grid, kind: 'web', url: baseUrl ? baseUrl + '/' + dash : '', auth: { type: 'ha', token: ha.token || '' }, themed: false };
+      out = grid.gridOn ? { ...synthetic, tiles: await resolveTiles(grid.tiles) } : synthetic;
+    } else {
+      const base = { ...grid, kind: 'web', url: appPageUrl(grid), themed: true };
+      out = grid.gridOn ? { ...base, tiles: await resolveTiles(grid.tiles) } : base;                  // file/app pages with the native button strip -> resolve its tile icons
+    }
   } else if (grid.kind === 'web') {
     out = grid.gridOn ? { ...grid, tiles: await resolveTiles(grid.tiles) } : grid;                    // dashboard: resolve the button-grid tile icons, else nothing to resolve
   } else {

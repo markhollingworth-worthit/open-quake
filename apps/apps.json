@@ -72,6 +72,19 @@
     ]
   },
   {
+    "id": "ha-dashboard",
+    "name": "Home Assistant Dashboard",
+    "options": [
+      {
+        "key": "dashboard",
+        "label": "Dashboard",
+        "type": "text",
+        "default": "lovelace",
+        "help": "url_path of an HA Lovelace dashboard (e.g. 'lovelace' for Overview). Use the picker above to pick one from your HA server."
+      }
+    ]
+  },
+  {
     "id": "tzclock",
     "name": "World Clock",
     "file": "tzclock.html",
