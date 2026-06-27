@@ -938,6 +938,18 @@
         <p class="hint">Specified in apps.json.</p>
         ${devEnabled() ? devApps.map(a => appRow(a, devShown(a.id))).join('') : ''}` : ''}`;
 
+    // Auth tab — credentials shared across the app (currently just Home Assistant). Token is stored
+    // encrypted at rest via secretStore (same path as settings.spotify.refreshToken).
+    const ha = (s.haAuth && typeof s.haAuth === 'object') ? s.haAuth : { url: '', token: '' };
+    const authHtml = `
+      <p class="sectitle">Home Assistant</p>
+      <p class="hint">Used by the HA Schedule developer app and any other open-quake feature that needs a global HA credential. Per-dashboard tokens stay on the dashboard page itself.</p>
+      <div class="row"><label>URL</label>
+        <input type="text" id="sHaUrl" value="${esc(ha.url || '')}" placeholder="http://homeassistant.local:8123" style="flex:1"></div>
+      <div class="row"><label>Long-Lived Access Token</label>
+        <input type="password" id="sHaToken" value="${esc(ha.token || '')}" placeholder="paste your long-lived access token" style="flex:1"></div>
+      <p class="hint">The token is stored encrypted at rest (same secret store as your dashboard tokens). It only leaves the main process for features that need it.</p>`;
+
     // Drop-In Apps tab — manage user-installed app folders (import/export/delete) + storage location
     const diHtml = `
       <p class="sectitle">Drop-In Apps</p>
@@ -963,9 +975,10 @@
         <button id="tabTh" class="tab${tab === 'theme' ? ' on' : ''}">Theme</button>
         <button id="tabApps" class="tab${tab === 'apps' ? ' on' : ''}">Apps</button>
         <button id="tabDi" class="tab${tab === 'dropin' ? ' on' : ''}">Drop-In Apps</button>
+        <button id="tabAuth" class="tab${tab === 'auth' ? ' on' : ''}">Auth</button>
         <button id="tabMon" class="tab${tab === 'monitor' ? ' on' : ''}">Monitor</button>
       </div>
-      ${tab === 'software' ? swHtml : tab === 'hardware' ? hwHtml : tab === 'theme' ? thHtml : tab === 'apps' ? appsHtml : tab === 'dropin' ? diHtml : monHtml}
+      ${tab === 'software' ? swHtml : tab === 'hardware' ? hwHtml : tab === 'theme' ? thHtml : tab === 'apps' ? appsHtml : tab === 'dropin' ? diHtml : tab === 'auth' ? authHtml : monHtml}
       <div class="row" style="margin-top:22px"><button id="sBack">← Back to pages</button></div>`;
 
     document.getElementById('tabSw').onclick = () => { settingsTab = 'software'; renderSettings(); };
@@ -973,6 +986,7 @@
     document.getElementById('tabTh').onclick = () => { settingsTab = 'theme'; renderSettings(); };
     document.getElementById('tabApps').onclick = () => { settingsTab = 'apps'; renderSettings(); };
     document.getElementById('tabDi').onclick = () => { settingsTab = 'dropin'; renderSettings(); };
+    document.getElementById('tabAuth').onclick = () => { settingsTab = 'auth'; renderSettings(); };
     document.getElementById('tabMon').onclick = () => { settingsTab = 'monitor'; renderSettings(); };
     document.getElementById('sBack').onclick = () => { view = 'pages'; render(); };
     const setS = (k, v) => { if (!config.settings) config.settings = {}; config.settings[k] = v; markDirty(); };
@@ -1048,6 +1062,17 @@
         renderList();
       };
       renderList();
+    }
+
+    if (tab === 'auth') {
+      const saveHa = patch => {
+        if (!config.settings) config.settings = {};
+        const cur = (config.settings.haAuth && typeof config.settings.haAuth === 'object') ? config.settings.haAuth : { url: '', token: '' };
+        config.settings.haAuth = Object.assign({ url: '', token: '' }, cur, patch);
+        markDirty();
+      };
+      document.getElementById('sHaUrl').oninput = e => saveHa({ url: e.target.value.trim() });
+      document.getElementById('sHaToken').oninput = e => saveHa({ token: e.target.value.trim() });
     }
 
     if (tab === 'software') {

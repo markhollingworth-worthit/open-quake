@@ -11,6 +11,7 @@
 //   app grids (g.kind === 'app'): each option key whose schema type is 'secret' (apps.json).
 //   settings:
 //     settings.spotify.refreshToken                   (NOT settings.spotify.clientId — clientId is public)
+//     settings.haAuth.token                           (NOT settings.haAuth.url — the URL is not sensitive)
 const MARKER = 'oqenc:v1:';
 
 function createSecretStore({ safeStorage, loadApps, log = () => {} }) {
@@ -66,11 +67,16 @@ function createSecretStore({ safeStorage, loadApps, log = () => {} }) {
   }
 
   // Apply `fn` to exactly the secret fields under config.settings, in place (config is a clone supplied
-  // by the callers). Currently: settings.spotify.refreshToken (clientId is PUBLIC and stays plaintext).
+  // by the callers). Currently: settings.spotify.refreshToken and settings.haAuth.token (URL/clientId
+  // stay plaintext — they aren't secrets).
   function transformSettingsSecrets(config, fn) {
     const sp = config && config.settings && config.settings.spotify;
     if (sp && typeof sp === 'object' && typeof sp.refreshToken === 'string' && sp.refreshToken !== '') {
       sp.refreshToken = fn(sp.refreshToken);
+    }
+    const ha = config && config.settings && config.settings.haAuth;
+    if (ha && typeof ha === 'object' && typeof ha.token === 'string' && ha.token !== '') {
+      ha.token = fn(ha.token);
     }
   }
 
