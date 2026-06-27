@@ -1133,7 +1133,13 @@
         statusEl.style.color = '#7e93ab';
       };
       const refresh = async () => {
-        refBtn.disabled = true; statusEl.textContent = 'Refreshing…'; statusEl.style.color = '#7e93ab';
+        refBtn.disabled = true;
+        // Main reads useHa / URL / token from its in-memory config, which only updates on Save.
+        // Auto-save first so toggling Use HA and clicking Refresh "just works" without remembering
+        // to Save between. IPC is ordered, so the save (ipc.send) is processed before the refresh
+        // (ipc.invoke) reaches main's handler.
+        if (dirty) { statusEl.textContent = 'Saving, then refreshing…'; statusEl.style.color = '#7e93ab'; doSave(); }
+        else { statusEl.textContent = 'Refreshing…'; statusEl.style.color = '#7e93ab'; }
         try { showStatus(await configApi.refreshHaCache()); }
         catch (e) { statusEl.textContent = 'Refresh failed: ' + (e.message || e); statusEl.style.color = '#c98'; }
         finally { refBtn.disabled = !useBox.checked; }
