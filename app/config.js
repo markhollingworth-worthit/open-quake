@@ -23,7 +23,26 @@
   }
   const appIconCache = {};   // app value -> dataURL | false (failed) | null (in-flight)
   const urlIconPreview = {}; // iconCache path -> dataURL of a just-fetched URL icon (editor preview only; dodges file:// browser-cache staleness on Refresh)
-  const TYPES = [['', 'Empty'], ['app', 'App / Program'], ['url', 'Website (URL)'], ['page', 'Go to open-quake page'], ['cmd', 'Shell command'], ['open', 'Open file/folder'], ['system', 'System (lock/config)'], ['counter', 'Counter'], ['paste_text', 'Paste Text'], ['key', 'Send keystroke'], ['macro', 'Macro / Steps']];
+  const TYPES = [['', 'Empty'], ['app', 'App / Program'], ['url', 'Website (URL)'], ['page', 'Go to open-quake page'], ['cmd', 'Shell command'], ['open', 'Open file/folder'], ['system', 'System (lock/config)'], ['counter', 'Counter'], ['paste_text', 'Paste Text'], ['key', 'Send keystroke'], ['macro', 'Macro / Steps'], ['ha', 'HA entity']];
+  // Curated per-domain service catalog for HA entity tiles. Lookup falls back to HA_SERVICES_DEFAULT
+  // for any domain we don't have a more specific list for. First entry is the default service when
+  // the user picks an entity of that domain.
+  const HA_SERVICES_BY_DOMAIN = {
+    light:         [['toggle', 'Toggle'], ['turn_on', 'Turn on'], ['turn_off', 'Turn off']],
+    switch:        [['toggle', 'Toggle'], ['turn_on', 'Turn on'], ['turn_off', 'Turn off']],
+    input_boolean: [['toggle', 'Toggle'], ['turn_on', 'Turn on'], ['turn_off', 'Turn off']],
+    fan:           [['toggle', 'Toggle'], ['turn_on', 'Turn on'], ['turn_off', 'Turn off']],
+    media_player:  [['media_play_pause', 'Play / Pause'], ['media_play', 'Play'], ['media_pause', 'Pause'], ['media_stop', 'Stop'], ['media_next_track', 'Next'], ['media_previous_track', 'Previous'], ['volume_up', 'Volume up'], ['volume_down', 'Volume down'], ['volume_mute', 'Mute']],
+    scene:         [['turn_on', 'Activate']],
+    script:        [['turn_on', 'Run']],
+    automation:    [['trigger', 'Trigger'], ['toggle', 'Toggle'], ['turn_on', 'Enable'], ['turn_off', 'Disable']],
+    cover:         [['toggle', 'Toggle'], ['open_cover', 'Open'], ['close_cover', 'Close'], ['stop_cover', 'Stop']],
+    lock:          [['lock', 'Lock'], ['unlock', 'Unlock']],
+    vacuum:        [['start', 'Start'], ['stop', 'Stop'], ['return_to_base', 'Dock'], ['pause', 'Pause']],
+    climate:       [['turn_on', 'Turn on'], ['turn_off', 'Turn off']],
+    input_button:  [['press', 'Press']],
+  };
+  const HA_SERVICES_DEFAULT = [['toggle', 'Toggle'], ['turn_on', 'Turn on'], ['turn_off', 'Turn off']];
   // Step kinds inside a Macro tile (value semantics mirror the matching tile types).
   const STEP_KINDS = [['key', 'Keystroke'], ['text', 'Type text'], ['delay', 'Delay (ms)'], ['app', 'App / Program'], ['open', 'Open file/folder'], ['url', 'Website (URL)'], ['cmd', 'Shell command'], ['page', 'Go to page'], ['system', 'System'], ['ahk', 'AutoHotkey']];
   // Knob behavior options (per page-type, with per-page override). Defaults: turn=Scroll pages, click=Start/stop rotation.
@@ -413,6 +432,7 @@
     if (t.type === 'page') body = `<div class="row"><label>Page</label>${pageSelectHtml(t)}</div>`;
     else if (t.type === 'macro') body = `<div class="row"><label>Steps</label></div><div id="macroSteps"></div>`;
     else if (t.type === 'key') body = `<div class="row"><label>Keys</label><input id="tValue" value="${esc(t.value)}" placeholder="${valuePlaceholder('key')}"><button id="tRec" type="button">Record</button></div>`;
+    else if (t.type === 'ha') body = haTileBodyHtml(t);
     else body = `<div class="row"><label>Value</label><input id="tValue" value="${esc(t.value)}" placeholder="${valuePlaceholder(t.type)}">${t.type === 'app'
         ? '<button id="tBrowse">Browse…</button>'
         : t.type === 'open'
@@ -427,7 +447,7 @@
       <p class="hint">${typeHint(t.type)}</p>
     </div>`;
     document.getElementById('tLabel').oninput = e => { t.label = e.target.value; renderTiles(); markDirty(); };
-    document.getElementById('tType').onchange = e => { const prev = t.type; t.type = e.target.value; if (t.type === 'page' || prev === 'page') t.value = ''; if (t.type === 'macro' && !Array.isArray(t.steps)) t.steps = []; render(); markDirty(); };
+    document.getElementById('tType').onchange = e => { const prev = t.type; t.type = e.target.value; if (t.type === 'page' || prev === 'page' || t.type === 'ha' || prev === 'ha') { t.value = ''; t.service = ''; } if (t.type === 'macro' && !Array.isArray(t.steps)) t.steps = []; render(); markDirty(); };
     const tv = document.getElementById('tValue');
     if (tv) tv.oninput = e => { t.value = e.target.value; renderTiles(); renderIconPane(); markDirty(); };
     const tp = document.getElementById('tPage');
@@ -443,6 +463,7 @@
     const tRec = document.getElementById('tRec');
     if (tRec && tv) tRec.onclick = () => captureCombo(tv, c => { t.value = c; tv.value = c; renderTiles(); markDirty(); });
     if (t.type === 'macro') renderMacroSteps(t);
+    if (t.type === 'ha') wireHaTile(t);
     renderIconPane();
   }
 
@@ -592,7 +613,110 @@
     if (type === 'paste_text') return 'Tap this tile to paste the text into whatever window is active on your PC (overwrites your clipboard).';
     if (type === 'key') return 'Sends a key combo to the active window. Type it (e.g. control+shift+esc) or click Record and press the keys.';
     if (type === 'macro') return 'Runs the steps in order on tap — keystrokes, typed text, delays, app/command/URL launches, page switches, or AutoHotkey.';
+    if (type === 'ha') return 'Calls a Home Assistant service on the picked entity. Filter by device type, room, label, or favorites. Star an entity to add it to favorites.';
     return '';
+  }
+
+  // ---- HA entity tile helpers ----
+  function haServicesFor(domain) { return HA_SERVICES_BY_DOMAIN[domain] || HA_SERVICES_DEFAULT; }
+  function haDefaultService(domain) { return haServicesFor(domain)[0][0]; }
+  function haEntityDomain(entityOrService) { const dot = (entityOrService || '').indexOf('.'); return dot > 0 ? entityOrService.slice(0, dot) : ''; }
+  function haFavorites() { return ((((config.settings || {}).haAuth) || {}).favorites) || []; }
+  function haToggleFavorite(entityId) {
+    if (!entityId) return;
+    if (!config.settings) config.settings = {};
+    if (!config.settings.haAuth) config.settings.haAuth = { url: '', token: '', useHa: false };
+    const set = new Set(config.settings.haAuth.favorites || []);
+    if (set.has(entityId)) set.delete(entityId); else set.add(entityId);
+    config.settings.haAuth.favorites = Array.from(set).sort();
+    markDirty();
+  }
+  // The picker body — populated by wireHaTile after fetching the HA cache from main.
+  function haTileBodyHtml() {
+    return `<div id="haPicker">
+      <div class="row"><label>Device Type</label><select id="haDom" style="flex:1"><option value="">All</option></select></div>
+      <div class="row"><label>Room</label><select id="haArea" style="flex:1"><option value="">All</option></select></div>
+      <div class="row"><label>Label</label><select id="haLabel" style="flex:1"><option value="">All</option></select></div>
+      <div class="row"><label>Favorites</label><label class="iconopt" style="width:auto"><input type="checkbox" id="haFav"> Show only favorites</label></div>
+      <div class="row"><label>Entity</label>
+        <select id="haEntity" size="8" style="flex:1; font-family:monospace; font-size:12px"></select>
+        <button id="haStar" type="button" title="Toggle favorite" style="margin-left:6px">☆</button></div>
+      <div class="row"><label>Service</label><select id="haService" style="flex:1"></select></div>
+      <p class="hint" id="haTileStatus" style="margin:4px 0 0">Loading entities…</p>
+    </div>`;
+  }
+  async function wireHaTile(t) {
+    const status = document.getElementById('haTileStatus'); if (!status) return;
+    const cache = await configApi.getHaCache();
+    if (!cache || !cache.ok || !cache.entities || !cache.entities.length) {
+      status.textContent = cache && cache.error ? 'HA cache not loaded: ' + cache.error + '. Open Settings → Auth and click Refresh Configuration.' : 'HA cache empty. Enable Use Home Assistant in Settings → Auth, then click Refresh Configuration.';
+      status.style.color = '#c98';
+      return;
+    }
+    const entities = cache.entities;
+    const domSel = document.getElementById('haDom');
+    const areaSel = document.getElementById('haArea');
+    const labelSel = document.getElementById('haLabel');
+    const favBox = document.getElementById('haFav');
+    const entSel = document.getElementById('haEntity');
+    const svcSel = document.getElementById('haService');
+    const starBtn = document.getElementById('haStar');
+
+    const uniqDomains = Array.from(new Set(entities.map(e => e.domain).filter(Boolean))).sort();
+    const uniqAreas = Array.from(new Set(entities.map(e => e.area).filter(Boolean))).sort();
+    const uniqLabels = Array.from(new Set(entities.flatMap(e => e.labels || []).filter(Boolean))).sort();
+    domSel.innerHTML = '<option value="">All</option>' + uniqDomains.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join('');
+    areaSel.innerHTML = '<option value="">All</option>' + uniqAreas.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join('');
+    labelSel.innerHTML = '<option value="">All</option>' + uniqLabels.map(l => `<option value="${esc(l)}">${esc(l)}</option>`).join('');
+    // Pre-select the domain filter to match the saved entity so reopening lands on the same area.
+    const savedDomain = haEntityDomain(t.value);
+    if (savedDomain && uniqDomains.includes(savedDomain)) domSel.value = savedDomain;
+
+    const refreshStar = () => { starBtn.textContent = haFavorites().includes(t.value) ? '★' : '☆'; starBtn.disabled = !t.value; };
+    const refreshServiceList = () => {
+      const dom = haEntityDomain(t.value);
+      if (!dom) { svcSel.innerHTML = '<option value="" disabled>(pick an entity first)</option>'; return; }
+      const svcs = haServicesFor(dom);
+      // Reset service if the entity's domain changed (old service might not apply).
+      if (!t.service || haEntityDomain(t.service) !== dom) t.service = dom + '.' + haDefaultService(dom);
+      svcSel.innerHTML = svcs.map(([v, n]) => `<option value="${esc(dom + '.' + v)}" ${t.service === dom + '.' + v ? 'selected' : ''}>${esc(n)}</option>`).join('');
+    };
+    const populate = () => {
+      const favSet = new Set(haFavorites());
+      let list = entities;
+      if (domSel.value) list = list.filter(e => e.domain === domSel.value);
+      if (areaSel.value) list = list.filter(e => e.area === areaSel.value);
+      if (labelSel.value) list = list.filter(e => (e.labels || []).includes(labelSel.value));
+      if (favBox.checked) list = list.filter(e => favSet.has(e.entityId));
+      list.sort((a, b) => a.friendlyName.localeCompare(b.friendlyName));
+      const opts = list.map(e => {
+        const fmark = favSet.has(e.entityId) ? '★ ' : '';
+        const sub = e.area ? ' · ' + e.area : '';
+        return `<option value="${esc(e.entityId)}" ${e.entityId === t.value ? 'selected' : ''}>${fmark}${esc(e.friendlyName)}${sub} (${esc(e.entityId)})</option>`;
+      });
+      // Surface a saved entity that's no longer in the cache so the user can see what's stored.
+      if (t.value && !list.some(e => e.entityId === t.value)) opts.unshift(`<option value="${esc(t.value)}" selected>${esc(t.value)} (not in current cache)</option>`);
+      entSel.innerHTML = opts.length ? opts.join('') : '<option value="" disabled>(no entities match these filters)</option>';
+      refreshServiceList();
+      refreshStar();
+      status.textContent = list.length + ' entit' + (list.length === 1 ? 'y' : 'ies') + (cache.entities.length === list.length ? '' : ' of ' + cache.entities.length + ' total');
+      status.style.color = '#7e93ab';
+    };
+
+    entSel.onchange = e => {
+      t.value = e.target.value;
+      refreshServiceList(); refreshStar();
+      // Helpful default: stamp the friendly name as the tile label if the user hasn't named it.
+      if (!t.label) { t.label = (entities.find(x => x.entityId === t.value) || {}).friendlyName || t.value; document.getElementById('tLabel').value = t.label; }
+      renderTiles(); renderIconPane(); markDirty();
+    };
+    svcSel.onchange = e => { t.service = e.target.value; markDirty(); };
+    starBtn.onclick = () => { haToggleFavorite(t.value); refreshStar(); if (favBox.checked) populate(); };
+    domSel.onchange = populate;
+    areaSel.onchange = populate;
+    labelSel.onchange = populate;
+    favBox.onchange = populate;
+    populate();
   }
 
   // ---- dashboard page (web) ----

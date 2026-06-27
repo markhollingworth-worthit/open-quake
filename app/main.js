@@ -639,9 +639,38 @@ async function runAction(a) {
     finally { macroBusy = false; }
     return;
   }
+  if (a.type === 'ha') {
+    // HA entity tile: fire a service call against the picked entity. Service is "domain.action"
+    // (e.g. "light.toggle", "media_player.media_play_pause"). callHaService throws on misconfig
+    // or HA error — log and swallow so a misfire never crashes the launch path.
+    console.log('launch:', a.label, '-> ha', a.value, 'service=' + (a.service || ''));
+    try { await callHaService(a.value, a.service); } catch (e) { console.log('ha action error:', e.message); }
+    return;
+  }
   if (a.value != null && typeof a.value !== 'string') return;   // value, when present, is a string
   console.log('launch:', a.label, '->', a.type, a.value);
   try { await runStep({ kind: a.type, value: a.value }); } catch (e) { console.log('action error:', e.message); }
+}
+
+// POST /api/services/{domain}/{action} with {entity_id}. Used by HA entity tiles; throws on
+// any misconfig (Use HA off, missing URL/token, bad service string) or non-2xx response.
+async function callHaService(entityId, fullService) {
+  if (typeof entityId !== 'string' || !entityId) throw new Error('entity_id missing');
+  if (typeof fullService !== 'string' || !fullService) throw new Error('service missing');
+  const ha = (config.settings && config.settings.haAuth) || {};
+  if (!ha.useHa) throw new Error('Use Home Assistant is off');
+  if (!ha.url || !ha.token) throw new Error('HA URL/token missing (Auth tab)');
+  const dot = fullService.indexOf('.');
+  if (dot < 1) throw new Error('service must be domain.action');
+  const domain = fullService.slice(0, dot), action = fullService.slice(dot + 1);
+  const u = new URL(ha.url);
+  u.pathname = u.pathname.replace(/\/+$/, '') + '/api/services/' + encodeURIComponent(domain) + '/' + encodeURIComponent(action);
+  const r = await net.fetch(u.href, {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + ha.token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entity_id: entityId }),
+  });
+  if (!r.ok) throw new Error('HA ' + r.status);
 }
 // One macro step (also the single-action path). New kinds: key (combo), text (typed), delay (ms).
 async function runStep(step) {
