@@ -24,6 +24,12 @@ It gives you:
 - **Web dashboard pages** — a page can be a live web view (Home Assistant, Grafana,
   a status page…) shown full-screen; the knob scrolls, a tap clicks, logins persist,
   with per-page auth (HA token, Basic, custom headers). → [Dashboards](docs/dashboards.md)
+- **Home Assistant integration** — set your HA URL + long-lived token once in
+  **Settings → Auth**, and three things light up: a **Home Assistant Dashboard** app
+  (pick from your real dashboards in a dropdown), **HA entity tiles** (tap a tile to call
+  a service on a light / switch / media player / scene / automation / …, filtered by
+  device type, room, label, or favorites), and **real MDI icons** rendered live from
+  jsDelivr so tiles look like HA does. → [Home Assistant](docs/home-assistant.md)
 - **Knob control** — rotate for volume (or dashboard scroll), single-click to mute,
   **double-click for the page selector**, and **hold to talk** (voice input). The
   knob's **RGB ring** is configurable. → [Settings](docs/settings.md)
@@ -54,7 +60,7 @@ Detailed guides live in **[docs/](docs/README.md)**:
 
 - [The editor](docs/editor.md) · [Web dashboards](docs/dashboards.md) · [Bundled apps](docs/apps.md)
 - [Music controller](docs/music.md) · [System monitor](docs/system-monitor.md) · [Open WebUI chat + voice](docs/ai-chat.md)
-- [Settings & knob lighting](docs/settings.md) · [Building & how it works](docs/building.md) · [Device protocol](docs/DEVICE_PROTOCOL.md)
+- [Home Assistant integration](docs/home-assistant.md) · [Settings & knob lighting](docs/settings.md) · [Building & how it works](docs/building.md) · [Device protocol](docs/DEVICE_PROTOCOL.md)
 
 ## Download
 

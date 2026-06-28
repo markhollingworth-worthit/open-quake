@@ -2,8 +2,10 @@
 
 The editor's **⚙ Settings** page (top-right) holds the app- and device-level options,
 split into a **Software** tab (on launch, screen rotation), a **Hardware** tab (knob
-ring, microphone), a **Theme** tab (light/dark + accent color), and an **Apps** tab
-(which apps appear in the picker):
+ring, microphone), a **Theme** tab (light/dark + accent color), an **Apps** tab
+(which apps appear in the picker), a **Drop-In Apps** tab (manage installed drop-ins),
+an **Auth** tab (Home Assistant credentials — see below), and a **Monitor** tab (what
+the knob does in monitor mode):
 
 - **On launch** — open the editor window, start **minimized** to the taskbar, or run
   **tray-only** (panel + system tray, no window). open-quake always sits in the system
@@ -51,3 +53,25 @@ ring, microphone), a **Theme** tab (light/dark + accent color), and an **Apps** 
 
 The ring is driven over the device's QMK VIA lighting channel; settings are stored in
 `%APPDATA%\open-quake` and re-applied on connect.
+
+## Auth (Home Assistant)
+
+The **Auth** tab holds credentials shared across open-quake features that talk to a
+single server. Today that's just Home Assistant.
+
+- **Use Home Assistant** — off by default. When on, open-quake caches your HA
+  configuration (dashboards, areas, devices, entities, floors, labels) at launch and
+  exposes the **Home Assistant Dashboard** app and **HA entity** tile type.
+- **URL** — your HA base URL (e.g. `https://ha.example.com` or `http://homeassistant.local:8123`).
+- **Long-Lived Access Token** — create one in HA (profile → Security → bottom of the
+  page). Stored **encrypted at rest** via Electron `safeStorage`, the same secret
+  store per-dashboard HA tokens use.
+- **Refresh Configuration** — pulls a fresh copy of the registries from HA. If you
+  toggle Use HA or change credentials, click Refresh — it auto-saves first so the
+  refresh sees your edits.
+- Status line shows what loaded (`12 dashboards, 487 entities, 24 areas, …`) or any
+  error.
+
+The full HA integration guide — what gets cached, the Dashboard app, entity tiles, the
+service catalog, icon resolution, memory footprint — lives in
+[Home Assistant integration](home-assistant.md).
