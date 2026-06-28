@@ -62,6 +62,12 @@ Detailed guides live in **[docs/](docs/README.md)**:
 - [Music controller](docs/music.md) · [System monitor](docs/system-monitor.md) · [Open WebUI chat + voice](docs/ai-chat.md)
 - [Home Assistant integration](docs/home-assistant.md) · [Settings & knob lighting](docs/settings.md) · [Building & how it works](docs/building.md) · [Device protocol](docs/DEVICE_PROTOCOL.md)
 
+## Companion project
+
+**[Bedrock open desk console](https://github.com/TeeJS/bedrock-console)** — an open-source
+hardware project to build your own 1920×480 touchscreen + knob console for use with open-quake.
+Generic parts, 3D-printable enclosure, RP2040 firmware for the knob. Early WIP.
+
 ## Download
 
 Grab a build from the **[Releases](https://github.com/TeeJS/open-quake/releases)** page (Windows x64):
