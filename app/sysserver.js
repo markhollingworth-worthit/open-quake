@@ -33,7 +33,7 @@ const LOCAL_APP_CSP = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: file: http: https:",
   "font-src 'self' data:",
-  "connect-src 'self' http: https:",
+  "connect-src 'self' http: https: ws: wss:",
   "media-src 'self' blob: data:",
   "object-src 'none'",
   "base-uri 'none'",
