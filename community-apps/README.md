@@ -8,7 +8,13 @@ For how to install or submit an app — and a safety note — see the docs:
 
 ## Available apps
 
-_No apps published yet._ To add one, open a pull request — see
+- **[news-spotlight](news-spotlight)** — full-screen rotating RSS feed reader. Defaults
+  to BBC / Sky / The Verge / Ars Technica; configurable feeds, story duration, Ken
+  Burns motion, breaking-news mode, and an SSRF-safe proxy. Download
+  [`news-spotlight.zip`](news-spotlight.zip) and import via
+  **Settings → Drop-In Apps → Add**.
+
+To add one, open a pull request — see
 [docs/community-apps.md](../docs/community-apps.md#submitting-one).
 
 ## For developers
