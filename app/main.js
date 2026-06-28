@@ -1072,6 +1072,20 @@ function flushDashCookies() {
   clearTimeout(cookieFlushT);
   cookieFlushT = setTimeout(() => { try { if (dashSession) dashSession.cookies.flushStore(); } catch (e) {} }, 2000);
 }
+// Parse an Electron accelerator's modifier tokens into the robotjs key names we need to keyUp().
+// Win32 RegisterHotKey can leave Ctrl/Shift/Alt/Win "stuck-held" in the OS's view after the hotkey
+// fires (the keyup events don't always reach the foreground app), so we synthesize a release for
+// each modifier in the accelerator the moment the hotkey fires. No-op on non-Windows.
+function modifiersInAccelerator(accel) {
+  const out = [];
+  const lower = String(accel || '').toLowerCase().split('+').map(t => t.trim());
+  if (lower.some(t => t === 'ctrl' || t === 'control' || t === 'commandorcontrol' || t === 'cmdorctrl')) out.push('control');
+  if (lower.includes('shift')) out.push('shift');
+  if (lower.some(t => t === 'alt' || t === 'option')) out.push('alt');
+  if (lower.some(t => t === 'super' || t === 'meta' || t === 'cmd' || t === 'command')) out.push('command');
+  return out;
+}
+
 // Per-page global hotkeys: register each page's `shortcut` so pressing it (system-wide) jumps the panel
 // to that page. Re-applied on launch and after every editor save; a combo another app owns just fails to
 // register (logged). Requires app-ready.
@@ -1080,7 +1094,13 @@ function applyShortcuts() {
   for (const g of (config.grids || [])) {
     if (!g.shortcut) continue;
     try {
-      const ok = globalShortcut.register(g.shortcut, () => { gotoGrid(g.id, true); if (rotateRunning) scheduleRotation(); });
+      const ok = globalShortcut.register(g.shortcut, () => {
+        // Release any held modifiers BEFORE the gotoGrid work so the OS sees them released
+        // immediately, not after async window/IPC churn. See modifiersInAccelerator above.
+        if (process.platform === 'win32') modifiersInAccelerator(g.shortcut).forEach(m => mediaKeys.keyUp(m));
+        gotoGrid(g.id, true);
+        if (rotateRunning) scheduleRotation();
+      });
       if (!ok) console.log('shortcut already in use, not registered:', g.shortcut, '->', g.id);
     } catch (e) { console.log('shortcut register error:', g.shortcut, '-', e.message); }
   }
