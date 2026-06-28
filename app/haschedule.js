@@ -3,8 +3,9 @@
  * haschedule.js — data source for the "HA Schedule" dev app. Pulls 6 agenda + 6 event input_text
  * helpers from Home Assistant in ONE /api/template call and parses them into structured rows. [dev, MIT]
  *
- * Credentials come from .env (HA_URL, HA_TOKEN), read by main.js and handed in via configure(). The token
- * never reaches the panel page — main fetches, sysserver serves only the parsed snapshot, same-origin.
+ * Credentials come from settings.haAuth (Settings → Auth in the editor), handed in via configure()
+ * by main.js. The token never reaches the panel page — main fetches, sysserver serves only the
+ * parsed snapshot, same-origin.
  *
  *   agenda line:  06/24|10:00 AM|AAA sprinklerworks here   ->  date | time | title
  *   event  line:  Rivoli|The Matrix|Fri|7:00 PM            ->  venue | title | day | time
@@ -69,7 +70,7 @@ function sortEvents(arr) {
 }
 
 async function poll() {
-  if (!baseUrl || !token) { snapshot = { agenda: [], events: [], ok: false, ts: Date.now(), error: 'missing HA_URL / HA_TOKEN in .env' }; return; }
+  if (!baseUrl || !token) { snapshot = { agenda: [], events: [], ok: false, ts: Date.now(), error: 'missing HA URL / token — set them in Settings → Auth' }; return; }
   try {
     const r = await net.fetch(baseUrl + '/api/template', {
       method: 'POST',

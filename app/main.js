@@ -448,18 +448,13 @@ function syncPollers(g) {
     else haschedule.stop();
   } catch (e) {}
 }
-// Minimal .env reader (KEY=VALUE lines) for dev-app secrets like the HA token — kept out of config/git.
-function loadEnv() {
-  const out = {};
-  for (const p of [path.join(process.cwd(), '.env'), path.join(__dirname, '..', '.env')]) {
-    try {
-      fs.readFileSync(p, 'utf8').split(/\r?\n/).forEach(line => {
-        const m = /^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-        if (m && !(m[1] in out)) out[m[1]] = m[2].replace(/^["']|["']$/g, '');
-      });
-    } catch (e) {}
-  }
-  return out;
+// Resolve HA creds for the dev apps (HA Schedule / Agenda / Events) from Settings → Auth.
+// Idempotent — safe to call on every settings save. Empty url/token leaves the poller idle and
+// the dev apps render their "missing HA URL / token" placeholder.
+function configureHaSchedule() {
+  const ha = (config.settings && config.settings.haAuth) || {};
+  haschedule.configure({ url: ha.url || '', token: ha.token || '' });
+  return ha.url || '';
 }
 async function pushToPanel() {
   if (panelWin && !panelWin.isDestroyed()) {
@@ -1235,8 +1230,8 @@ app.whenReady().then(async () => {
     sysserver = require('./sysserver');
     serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onAppLaunch, getGridTiles: getActiveAppTiles, getAppConfig: activeServedAppConfig, onOpenExternal: openExternalUrl, appFolders: discoveredServedApps() });
     ensureSystemViewPage(serverPort); ensureMusicPage(); ensureDropInDir();
-    const env = loadEnv(); haschedule.configure({ url: env.HA_URL, token: env.HA_TOKEN });   // HA Schedule dev app creds
-    console.log('SystemView + Music on http://127.0.0.1:' + serverPort + (env.HA_URL ? ' · HA Schedule -> ' + env.HA_URL : ''));
+    const haUrl = configureHaSchedule();
+    console.log('SystemView + Music on http://127.0.0.1:' + serverPort + (haUrl ? ' · HA Schedule -> ' + haUrl : ''));
   } catch (e) { console.log('local panel services failed to start:', e.message); }
   sweepIconCache();   // clean up orphaned URL-icon cache files left by prior sessions
 
@@ -1318,6 +1313,7 @@ app.whenReady().then(async () => {
     if (config.grids.some(g => g.id === active)) config.activeGridId = active;
     else if (!config.grids.some(g => g.id === config.activeGridId)) config.activeGridId = (config.grids[0] || {}).id || null;
     saveConfig(); pushToPanel(); applyKnobSettings(); refreshTray(); applyRotationSettings(wasRot); applyShortcuts(); applyTheme();
+    configureHaSchedule();                                          // pick up any haAuth edits without a restart
   });
   ipcMain.handle('pickProgram', async (e) => {
     if (!isFrom(e, configWin)) return null;
