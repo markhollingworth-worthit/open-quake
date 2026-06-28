@@ -1,0 +1,147 @@
+---
+name: open-quake-drop-in-app
+description: Scaffold, build, modify, migrate, or troubleshoot standalone open-quake drop-in apps. Use when working in the open-quake repository on apps/<app-id>/ structure, app.json manifests, index.html/style.css/app.js files, served drop-in apps, app options, server-only options, app-local server.js handlers, or existing generic app capabilities such as /app-proxy and /app-api.
+---
+
+# Open Quake Drop-In App
+
+Use this skill when creating or changing standalone drop-in apps in the open-quake repo.
+
+## Contract
+
+- Treat `apps/<app-id>/` as the app boundary.
+- A normal app is self-contained with `app.json`, `index.html`, optional `style.css`, optional `app.js`, optional local assets, and optional `server.js` only when using the generic app server capability.
+- Keep `app.json.id` stable, lowercase, and unique. Prefer matching the folder name for new apps.
+- During migration, preserve an existing app id even if the folder name differs.
+- Do not edit host/runtime files for a normal app.
+- Treat changes to app discovery, serving, editor behavior, IPC, packaging, local server behavior, or build files as platform work, not app work.
+- Use relative asset URLs in HTML, such as `style.css` and `app.js`.
+
+## Standalone Structure
+
+For a new app, create:
+
+```text
+apps/<app-id>/
+  app.json
+  index.html
+  style.css
+  app.js
+```
+
+Minimal `app.json`:
+
+```json
+{
+  "id": "<app-id>",
+  "name": "<App Name>",
+  "entry": "index.html",
+  "options": []
+}
+```
+
+Use `"served": true` when the app needs `/app-proxy`, `/app-api`, `/apptiles`, `/launch`, or other same-origin local server features.
+
+# Repository Rules
+
+- Future requests to add, create, or scaffold a normal drop-in app should only edit files under `apps/<app-id>/`.
+- Do not touch `app/main.js`, `app/sysserver.js`, `app/config.html`, packaging, or runtime code for a normal app request unless the user explicitly asks to change the platform.
+
+## Workflow
+
+1. Read `Repository Rules` first and follow its drop-in app rules.
+2. Inspect a nearby existing app, `apps/test-app`, before creating patterns.
+3. Create or edit only the app folder unless the user explicitly asks for platform work.
+4. Keep app options in `app.json`; read them from `location.search` for served apps or `location.hash` for file apps, matching the host loader behavior.
+5. Build the actual app screen first; avoid landing pages for tool/dashboard apps.
+6. Validate JSON manifests and syntax-check JavaScript with `node --check` when possible.
+
+## Served Apps
+
+- Use `"served": true` when the app needs same-origin calls to the local open-quake server, shared app tile APIs, or host-provided generic APIs.
+- Served drop-ins load at `/apps/<id>/<entry>` on the local server.
+- Use relative asset paths such as `style.css` and `app.js`.
+
+## Options
+
+- Define app options in `app.json`.
+- For served apps, non-server-only options are encoded into `location.search`.
+- For file apps, options are encoded into `location.hash`.
+- Mark sensitive or host-only values with `"serverOnly": true`; access those through `/app-proxy/config` or an app-local `server.js` handler.
+- Use `"type": "secret"` for passwords/API keys.
+
+Example:
+
+```json
+{
+  "key": "apiKey",
+  "label": "API key",
+  "type": "secret",
+  "default": "",
+  "serverOnly": true
+}
+```
+
+## Existing Generic Capabilities
+
+Use existing generic capabilities from `app.json`; do not modify host/runtime files during normal app scaffolding.
+
+For reusable API access, prefer a generic capability instead of app-specific hooks:
+
+- App declares proxy permissions in `app.json`.
+- Host exposes a stable generic endpoint for allowed requests.
+- Host enforces origin/pattern allowlists and method limits.
+- Host keeps secrets out of logs and responses.
+- Host supports self-signed TLS only through explicit per-app/per-request opt-in.
+
+Current proxy contract:
+
+- Add `"served": true` to apps that need the proxy.
+- Add an `app.json` `proxy` block, for example:
+
+```json
+{
+  "proxy": {
+    "methods": ["GET"],
+    "verifySslOption": "verifySsl",
+    "allow": [{ "option": "host" }]
+  }
+}
+```
+
+- Use `GET /app-proxy/config` to read active app options, including server-only options.
+- Use `GET /app-proxy?url=<encoded-url>` to fetch an allowed upstream URL.
+
+For app-local server code, declare `"server": "server.js"` and export `handle(action, context)`.
+
+```js
+'use strict';
+
+async function handle(action, context) {
+  if (action === 'summary') return { ok: true };
+  return { ok: false, error: 'unknown action' };
+}
+
+module.exports = { handle };
+```
+
+The active app can call `GET /app-api/<action>`. Keep integration-specific server code inside the app folder.
+
+Avoid adding routes named for a single integration, such as `/api/qnap/...`, unless the user asks for a built-in one-off integration.
+
+## Platform Work
+
+Only touch host/runtime code when the user explicitly asks to change the platform itself.
+
+Platform files include app discovery, serving, editor behavior, IPC, packaging, build files, and local server behavior. When platform work is explicitly requested, prefer generic, reusable capabilities over app-specific hooks.
+
+## Validation
+
+- Parse edited JSON: `node -e "JSON.parse(require('fs').readFileSync('apps/<app-id>/app.json','utf8'))"`.
+- Check JavaScript: `node --check apps/<app-id>/app.js` and `node --check apps/<app-id>/server.js` when present.
+- Search for accidental host hooks: `rg -n "<app-id>|/api/<app-id>" app apps`.
+- Confirm the app uses relative asset paths and no absolute legacy paths.
+
+## QNAP Lesson
+
+QNAP direct browser fetch can fail on TLS or CORS. If live LAN APIs must work from a drop-in app, use a generic host capability or app-local `server.js` rather than a specific host route.

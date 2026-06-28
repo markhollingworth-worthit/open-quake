@@ -127,6 +127,16 @@ Served drop-in apps can also declare host-side helpers:
 
 See `docs/app-template/` for a minimal starting point.
 
+### Authoring with Claude Code
+
+The [`open-quake-drop-in-app`](../community-apps/skills/open-quake-drop-in-app/SKILL.md)
+skill in `community-apps/skills/` guides Claude through scaffolding,
+modifying, or migrating a drop-in app. Drop it into your
+`.claude/skills/` folder (or invoke it with `/skill`) and Claude will
+follow the manifest contract, keep edits inside `apps/<app-id>/`, and
+prefer the generic `/app-proxy` / `/app-api` capabilities over
+host-specific routes.
+
 ## Legacy bundled apps
 
 Two kinds of bundled app:
