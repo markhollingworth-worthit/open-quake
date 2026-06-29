@@ -407,7 +407,9 @@
   function cyclePage(dir) {
     if (!grids.length) return;
     let gi = grids.findIndex(g => g.id === activeId); if (gi < 0) gi = 0;
-    panelApi.switchGrid(grids[(gi + dir + grids.length) % grids.length].id);
+    const next = grids[(gi + dir + grids.length) % grids.length];
+    panelApi.switchGrid(next.id);
+    flashVol(next.name || '(unnamed)');                 // brief overlay of the page name (same pattern as volume/rotation flashes)
   }
   function selHost() { return (webMode && webStrip) ? webgrid : (!webMode ? grid : null); }   // grid tiles, or a dashboard/app's strip; null on a page with no buttons
   function selButtons() { const out = []; (cfg.tiles || []).forEach((t, i) => { if (t && t.type && t.cover == null) out.push(i); }); return out; }
