@@ -385,13 +385,24 @@
     }
     if (k.type === 'press') {
       if (selOpen) { confirmSelector(); return; }           // any press picks the highlighted grid
-      if (k.index === 2) { openSelector(); return; }        // double-click -> page selector (always available)
-      const click = (cfg._knob && cfg._knob.click) || 'rotation';
-      if (click === 'mute') { panelApi.volume('mute'); flashVol('🔇'); }
-      else if (click === 'enter') { knobEnter(); }
-      else { pendingRotFlash = true; panelApi.toggleRotation(); }   // 'rotation' (default) — flash the new state on the rotation update
+      // Single press -> configured click action; double press -> configured dblclick action.
+      // Defaults preserve prior behavior: click='rotation' (toggle), dblclick='selector'.
+      const action = (k.index === 2)
+        ? ((cfg._knob && cfg._knob.dblclick) || 'selector')
+        : ((cfg._knob && cfg._knob.click) || 'rotation');
+      doKnobAction(action);
     }
   });
+  function doKnobAction(a) {
+    if (a === 'selector') return openSelector();
+    if (a === 'mute') { panelApi.volume('mute'); flashVol('🔇'); return; }
+    if (a === 'enter') return knobEnter();
+    if (a === 'home') return panelApi.gotoHome();
+    if (a === 'rotation_start') return panelApi.startRotation();
+    if (a === 'rotation_stop') return panelApi.stopRotation();
+    // 'rotation' (default toggle) — flash the new state on the rotation update
+    pendingRotFlash = true; panelApi.toggleRotation();
+  }
   // ---- knob "scroll pages" / "select button" / "enter" ----
   function cyclePage(dir) {
     if (!grids.length) return;

@@ -733,12 +733,12 @@ async function resolveTiles(tiles) {
 }
 // Knob behavior is configurable per page TYPE (grid / dashboard / app), with an optional per-page override.
 // turn: 'pages' | 'volume' | 'scroll' | 'select'   ·   click: 'rotation' | 'mute' | 'enter'
-const KNOB_DEFAULT = { turn: 'pages', click: 'rotation' };
+const KNOB_DEFAULT = { turn: 'pages', click: 'rotation', dblclick: 'selector' };
 function pageTypeOf(g) { return g.kind === 'app' ? 'app' : g.kind === 'web' ? 'dashboard' : 'grid'; }
 function effectiveKnob(g) {
   const all = (config.settings && config.settings.knob) || {};
   const base = Object.assign({}, KNOB_DEFAULT, all[pageTypeOf(g)] || {});
-  if (g.knobOverride && g.knob) return { turn: g.knob.turn || base.turn, click: g.knob.click || base.click };
+  if (g.knobOverride && g.knob) return { turn: g.knob.turn || base.turn, click: g.knob.click || base.click, dblclick: g.knob.dblclick || base.dblclick };
   return base;
 }
 async function resolveGridIcons(grid) {
@@ -1273,6 +1273,9 @@ app.whenReady().then(async () => {
   ipcMain.on('media', (e, cmd) => { if (!isFrom(e, panelWin)) return; mediaKey(cmd); });   // knob 'enter' on the music page -> play/pause
   ipcMain.on('switchGrid', (e, id) => { if (!isFrom(e, panelWin)) return; gotoGrid(id, true); if (rotateRunning) scheduleRotation(); });   // a manual pick resets the rotation timer
   ipcMain.on('toggleRotation', (e) => { if (!isFrom(e, panelWin)) return; toggleRotation(); });
+  ipcMain.on('startRotation', (e) => { if (!isFrom(e, panelWin)) return; setRotation(true); });
+  ipcMain.on('stopRotation', (e) => { if (!isFrom(e, panelWin)) return; setRotation(false); });
+  ipcMain.on('gotoHome', (e) => { if (!isFrom(e, panelWin)) return; if (config.homePageId) gotoGrid(config.homePageId, false); });
   ipcMain.on('openConfig', (e) => { if (!isFrom(e, panelWin) && !isFrom(e, configWin)) return; openConfigWindow(); });
   ipcMain.on('introDone', (e) => { if (!isFrom(e, panelWin)) return; config.introShown = true; saveConfig(); });   // remember the intro was dismissed
   ipcMain.on('saveTileValue', (e, data) => {

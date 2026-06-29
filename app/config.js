@@ -47,9 +47,25 @@
   const STEP_KINDS = [['key', 'Keystroke'], ['text', 'Type text'], ['delay', 'Delay (ms)'], ['app', 'App / Program'], ['open', 'Open file/folder'], ['url', 'Website (URL)'], ['cmd', 'Shell command'], ['page', 'Go to page'], ['system', 'System'], ['ahk', 'AutoHotkey']];
   // Knob behavior options (per page-type, with per-page override). Defaults: turn=Scroll pages, click=Start/stop rotation.
   const KNOB_TURN_OPTS = [['pages', 'Scroll pages'], ['volume', 'System volume'], ['scroll', 'Scroll in window'], ['select', 'Select button']];
-  const KNOB_CLICK_OPTS = [['rotation', 'Start/stop rotation'], ['mute', 'System audio toggle'], ['enter', 'Enter']];
-  const knobSelHtml = (id, opts, val) => `<select id="${id}">${opts.map(o => `<option value="${o[0]}" ${o[0] === val ? 'selected' : ''}>${o[1]}</option>`).join('')}</select>`;
-  function knobOf(type, field) { const k = ((config.settings || {}).knob || {})[type] || {}; return k[field] || (field === 'turn' ? 'pages' : 'rotation'); }
+  const KNOB_CLICK_OPTS = [
+    ['rotation', 'Toggle rotation'],
+    ['rotation_start', 'Start rotation'],
+    ['rotation_stop', 'Stop rotation'],
+    ['mute', 'System audio toggle'],
+    ['enter', 'Enter'],
+    ['home', 'Go to home page'],
+  ];
+  // Double-click has the same options as single-click, plus "Page selector" (default) which
+  // preserves the historical "double-click opens page selector" behavior.
+  const KNOB_DBLCLICK_OPTS = [['selector', 'Page selector']].concat(KNOB_CLICK_OPTS);
+  const knobSelHtml = (id, opts, val, extraStyle) => `<select id="${id}"${extraStyle ? ' style="' + extraStyle + '"' : ''}>${opts.map(o => `<option value="${o[0]}" ${o[0] === val ? 'selected' : ''}>${o[1]}</option>`).join('')}</select>`;
+  function knobOf(type, field) {
+    const k = ((config.settings || {}).knob || {})[type] || {};
+    if (k[field]) return k[field];
+    if (field === 'turn') return 'pages';
+    if (field === 'dblclick') return 'selector';
+    return 'rotation';
+  }
   const uid = () => 'g' + Math.random().toString(36).slice(2, 8);
   const curGrid = () => config.grids[gi];
   const esc = s => (s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -280,8 +296,12 @@
   function advRowHtml(g) {
     const hasApr = g.appearance === 'light' || g.appearance === 'dark';
     const hasAcc = /^#[0-9a-fA-F]{6}$/.test(g.accent || '');
-    return `<details class="advsec" style="margin-top:12px"${(hasApr || hasAcc) ? ' open' : ''}>
+    const isHome = config.homePageId === g.id;
+    return `<details class="advsec" style="margin-top:12px"${(hasApr || hasAcc || isHome) ? ' open' : ''}>
       <summary style="cursor:pointer;color:#9fb3c8;font-size:13px;user-select:none">Advanced settings</summary>
+      <div class="row" style="margin-top:8px"><label style="width:auto">Home page</label>
+        <label class="iconopt" style="width:auto"><input type="checkbox" id="gHome" ${isHome ? 'checked' : ''}> Set as home page</label></div>
+      <p class="hint">When set, the knob's <b>Go to home page</b> action (Settings → Hardware) jumps here. Only one page can be the home page at a time.</p>
       <div class="row" style="margin-top:8px"><label style="width:auto">Appearance</label>
         <label class="iconopt" style="width:auto"><input type="checkbox" id="gAprOn" ${hasApr ? 'checked' : ''}> Override</label>
         <select id="gApr" style="width:130px;margin-left:8px" ${hasApr ? '' : 'disabled'}>
@@ -294,7 +314,7 @@
       <p class="hint">When checked, this page overrides the global theme. (Web dashboards follow the global light/dark only.)</p>
       <div class="row" style="margin-top:8px"><label style="width:auto">Knob</label>
         <label class="iconopt" style="width:auto"><input type="checkbox" id="gKnobOn" ${g.knobOverride ? 'checked' : ''}> Override</label></div>
-      ${g.knobOverride ? `<div class="row"><label style="width:auto">Turn / Click</label>${knobSelHtml('gKnobTurn', KNOB_TURN_OPTS, (g.knob && g.knob.turn) || 'pages')} ${knobSelHtml('gKnobClick', KNOB_CLICK_OPTS, (g.knob && g.knob.click) || 'rotation')}</div>` : ''}
+      ${g.knobOverride ? `<div class="row"><label style="width:auto">Turn / Click / Dbl</label>${knobSelHtml('gKnobTurn', KNOB_TURN_OPTS, (g.knob && g.knob.turn) || 'pages')} ${knobSelHtml('gKnobClick', KNOB_CLICK_OPTS, (g.knob && g.knob.click) || 'rotation')} ${knobSelHtml('gKnobDblclick', KNOB_DBLCLICK_OPTS, (g.knob && g.knob.dblclick) || 'selector')}</div>` : ''}
       ${advCloneHtml(g)}
     </details>`;
   }
@@ -322,10 +342,29 @@
       accOn.onchange = e => { if (e.target.checked) g.accent = acc.value; else delete g.accent; acc.disabled = !e.target.checked; markDirty(); };
       acc.oninput = e => { if (accOn.checked) { g.accent = e.target.value; markDirty(); } };
     }
+    const gh = document.getElementById('gHome');
+    if (gh) gh.onchange = e => {
+      if (e.target.checked) {
+        const cur = config.homePageId;
+        if (cur && cur !== g.id) {
+          const other = config.grids.find(x => x.id === cur);
+          const name = (other && other.name) || cur;
+          if (!window.confirm(name + ' is currently set as home page, switch to this one?')) {
+            e.target.checked = false;
+            return;
+          }
+        }
+        config.homePageId = g.id;
+      } else {
+        if (config.homePageId === g.id) delete config.homePageId;
+      }
+      markDirty();
+    };
     const kOn = document.getElementById('gKnobOn');
-    if (kOn) kOn.onchange = e => { g.knobOverride = e.target.checked; if (g.knobOverride && !g.knob) g.knob = { turn: 'pages', click: 'rotation' }; markDirty(); render(); };
+    if (kOn) kOn.onchange = e => { g.knobOverride = e.target.checked; if (g.knobOverride && !g.knob) g.knob = { turn: 'pages', click: 'rotation', dblclick: 'selector' }; markDirty(); render(); };
     const kT = document.getElementById('gKnobTurn'); if (kT) kT.onchange = e => { if (!g.knob) g.knob = {}; g.knob.turn = e.target.value; markDirty(); };
     const kC = document.getElementById('gKnobClick'); if (kC) kC.onchange = e => { if (!g.knob) g.knob = {}; g.knob.click = e.target.value; markDirty(); };
+    const kD = document.getElementById('gKnobDblclick'); if (kD) kD.onchange = e => { if (!g.knob) g.knob = {}; g.knob.dblclick = e.target.value; markDirty(); };
     const clone = document.getElementById('gClone'), cloneBtn = document.getElementById('gCloneBtn');
     if (clone && cloneBtn) {
       clone.onchange = () => { cloneBtn.disabled = !clone.value; };
@@ -1295,10 +1334,25 @@
       <div class="row"><label>Effect speed</label>
         <input type="range" id="sSpeed" min="0" max="255" value="${L.speed}" style="width:200px">
         <span id="sSpeedVal" class="hint" style="margin:0 0 0 10px">${L.speed}</span></div>
-      <div class="row" style="margin-top:6px"><label>Knob — turn / click</label></div>
-      <div class="row"><label style="width:auto">Grid</label>${knobSelHtml('knGridTurn', KNOB_TURN_OPTS, knobOf('grid', 'turn'))} ${knobSelHtml('knGridClick', KNOB_CLICK_OPTS, knobOf('grid', 'click'))}</div>
-      <div class="row"><label style="width:auto">Dashboard</label>${knobSelHtml('knDashTurn', KNOB_TURN_OPTS, knobOf('dashboard', 'turn'))} ${knobSelHtml('knDashClick', KNOB_CLICK_OPTS, knobOf('dashboard', 'click'))}</div>
-      <div class="row"><label style="width:auto">App</label>${knobSelHtml('knAppTurn', KNOB_TURN_OPTS, knobOf('app', 'turn'))} ${knobSelHtml('knAppClick', KNOB_CLICK_OPTS, knobOf('app', 'click'))}</div>
+      <div style="margin-top:6px"><label>Knob — turn / click / double-click</label></div>
+      <div style="display:grid; grid-template-columns: 110px 1fr 1fr 1fr; gap:8px; align-items:center; margin-top:6px">
+        <span></span>
+        <span class="hint" style="font-weight:bold">Turn</span>
+        <span class="hint" style="font-weight:bold">Click</span>
+        <span class="hint" style="font-weight:bold">Double-click</span>
+        <label>Grid</label>
+        ${knobSelHtml('knGridTurn', KNOB_TURN_OPTS, knobOf('grid', 'turn'), 'width:100%')}
+        ${knobSelHtml('knGridClick', KNOB_CLICK_OPTS, knobOf('grid', 'click'), 'width:100%')}
+        ${knobSelHtml('knGridDblclick', KNOB_DBLCLICK_OPTS, knobOf('grid', 'dblclick'), 'width:100%')}
+        <label>Dashboard</label>
+        ${knobSelHtml('knDashTurn', KNOB_TURN_OPTS, knobOf('dashboard', 'turn'), 'width:100%')}
+        ${knobSelHtml('knDashClick', KNOB_CLICK_OPTS, knobOf('dashboard', 'click'), 'width:100%')}
+        ${knobSelHtml('knDashDblclick', KNOB_DBLCLICK_OPTS, knobOf('dashboard', 'dblclick'), 'width:100%')}
+        <label>App</label>
+        ${knobSelHtml('knAppTurn', KNOB_TURN_OPTS, knobOf('app', 'turn'), 'width:100%')}
+        ${knobSelHtml('knAppClick', KNOB_CLICK_OPTS, knobOf('app', 'click'), 'width:100%')}
+        ${knobSelHtml('knAppDblclick', KNOB_DBLCLICK_OPTS, knobOf('app', 'dblclick'), 'width:100%')}
+      </div>
       <p class="hint">What turning / clicking the knob does on each kind of page. Any page can override this in its <b>Advanced</b> settings. (“Select button” highlights tiles as you turn; “Enter” activates the highlighted button, play/pauses music, or sends an Enter key.)</p>
       <p class="hint">Changes apply to the ring instantly. <b>Save to device</b> writes them to the device's own memory so they survive a power-cycle. (Effect “All Off” turns the ring off. Animated effects use the color/speed; solid effects ignore speed.)</p>
       <div class="row" style="margin-top:6px"><button id="sSaveLed">Save to device</button><span id="sSaveLedMsg" class="hint" style="margin:0 0 0 10px"></span></div>
@@ -1583,12 +1637,13 @@
       const setKnob = (type, field, val) => {
         if (!config.settings) config.settings = {};
         if (!config.settings.knob) config.settings.knob = {};
-        if (!config.settings.knob[type]) config.settings.knob[type] = { turn: 'pages', click: 'rotation' };
+        if (!config.settings.knob[type]) config.settings.knob[type] = { turn: 'pages', click: 'rotation', dblclick: 'selector' };
         config.settings.knob[type][field] = val; markDirty();
       };
       [['grid', 'knGrid'], ['dashboard', 'knDash'], ['app', 'knApp']].forEach(([type, id]) => {
         document.getElementById(id + 'Turn').onchange = e => setKnob(type, 'turn', e.target.value);
         document.getElementById(id + 'Click').onchange = e => setKnob(type, 'click', e.target.value);
+        document.getElementById(id + 'Dblclick').onchange = e => setKnob(type, 'dblclick', e.target.value);
       });
     } else if (tab === 'monitor') {
       // Monitor mode — knob turn/tap behavior (applied by the main process while in monitor mode)
