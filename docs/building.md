@@ -56,6 +56,16 @@ keeps the mouse and touch aligned with what you see. open-quake auto-rotates its
 render if you leave it portrait, but then a desktop mouse moved onto the panel
 reads 90° off.
 
+If your taps land on the **wrong monitor** (Windows binds touch to the primary
+display by default for any HID touchscreen that doesn't include monitor IDs in its
+USB descriptor), open the editor → **Settings → Hardware → Set up touchscreen**.
+That detects which physical display the panel is on and runs the built-in
+`tabcal.exe` against it — accept the UAC prompt, then tap the crosshairs on the
+panel. (The Windows 11 24H2 Tablet PC Settings "Setup" button is broken and
+removed; the open-quake button drives the same underlying calibration directly.)
+If a prior calibration is stuck on the wrong display, use **Clear all
+calibrations** first, then **Set up touchscreen**.
+
 ## Code layout
 
 ```

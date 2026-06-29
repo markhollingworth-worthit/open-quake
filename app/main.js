@@ -15,6 +15,7 @@ const { createSecretStore } = require('./secretStore');
 const nowplaying = require('./nowplaying');   // same singleton sysserver polls — read its snapshot to target transport
 const haschedule = require('./haschedule');   // HA Schedule dev app — fed HA creds from .env, polled while shown
 const haClient = require('./haClient');       // Global HA cache (registries + dashboards); per-entity states fetched lazily
+const touchSetup = require('./touchSetup');   // Bind a touchscreen to its physical display via tabcal.exe (Windows)
 const ahk = require('./ahk');                  // macro "ahk" step backend (shells out to an installed AutoHotkey.exe)
 const HA_SCHEDULE_APPS = ['haschedule', 'agenda', 'events'];   // dev apps backed by the shared HA /haschedule-data snapshot
 
@@ -1408,6 +1409,25 @@ app.whenReady().then(async () => {
   ipcMain.on('imageToDataUrl', (e, filePath) => { e.returnValue = isFrom(e, configWin) ? (imageFileToDataUrl(filePath) || '') : ''; });
   ipcMain.handle('fetchIconUrl', (e, url) => isFrom(e, configWin) ? fetchIconToCache(url) : { ok: false, error: 'unauthorized' });
   ipcMain.handle('fetchMdiIcon', (e, name) => isFrom(e, configWin) ? fetchMdiToCache(name) : { ok: false, error: 'unauthorized' });
+  // Bind the touchscreen to its physical display via tabcal.exe (Windows). open-quake already
+  // identifies the panel display by its 1920x480 dimensions (deviceDisplay()); touchSetup
+  // cross-references that against the \\.\DISPLAY# enumeration so the user doesn't have to.
+  ipcMain.handle('setupTouchscreen', async (e) => {
+    if (!isFrom(e, configWin)) return { ok: false, error: 'unauthorized' };
+    if (process.platform !== 'win32') return { ok: false, error: 'Touchscreen setup is Windows-only.' };
+    const panel = deviceDisplay();
+    if (!panel) return { ok: false, error: 'Panel display not detected — plug in the panel first (Windows should see it as a 1920×480 monitor).' };
+    const displayId = await touchSetup.findDisplayId(panel);
+    if (!displayId) return { ok: false, error: "Couldn't match the panel display to a Windows DISPLAY# name." };
+    const r = touchSetup.runTabcal(displayId);
+    if (!r.ok) return r;
+    return { ok: true, displayId };
+  });
+  ipcMain.handle('clearTouchCalibration', (e) => {
+    if (!isFrom(e, configWin)) return { ok: false, error: 'unauthorized' };
+    if (process.platform !== 'win32') return { ok: false, error: 'Touchscreen setup is Windows-only.' };
+    return touchSetup.clearAllCalibrations();
+  });
 
   ipcMain.handle('saveLightingToDevice', (e) => { if (!isFrom(e, configWin)) return false; try { return dev.saveLighting(); } catch (er) { return false; } });
 

@@ -1544,7 +1544,11 @@
       <p class="sectitle" style="margin-top:22px">Microphone</p>
       <div class="row"><label>At launch</label>
         <input type="checkbox" id="sMic" style="width:auto;flex:none"><span class="hint" style="margin:0 0 0 8px">enable the device mic when open-quake starts</span></div>
-      <p class="hint">The mic LED and the mic audio are one hardware switch — the light is on whenever the mic is enabled, off when it isn't. Toggle it any time from the tray menu or a “System → mic” tile.</p>`;
+      <p class="hint">The mic LED and the mic audio are one hardware switch — the light is on whenever the mic is enabled, off when it isn't. Toggle it any time from the tray menu or a “System → mic” tile.</p>
+
+      <p class="sectitle" style="margin-top:22px">Touchscreen</p>
+      <p class="hint">If touches land on the wrong monitor, click <b>Set up touchscreen</b>. open-quake detects which physical display is the panel and runs Windows' built-in <code>tabcal.exe</code> against it (UAC prompt → tap the crosshairs on the panel). <b>Clear all calibrations</b> wipes prior bindings if the OS is holding onto the wrong one.</p>
+      <div class="row" style="gap:8px"><button id="sTouchSetup">Set up touchscreen</button><button id="sTouchClear">Clear all calibrations</button><span id="sTouchMsg" class="hint" style="margin:0 0 0 10px"></span></div>`;
 
     // Monitor tab — how the knob behaves while the device is used as a normal monitor
     const monHtml = `
@@ -1803,6 +1807,28 @@
       document.getElementById('sEffect').value = String(L.effect);
       document.getElementById('sMic').checked = !!s.micOnLaunch;
       document.getElementById('sMic').onchange = e => setS('micOnLaunch', e.target.checked);
+      const tMsg = document.getElementById('sTouchMsg');
+      const tBtn = document.getElementById('sTouchSetup');
+      const tClr = document.getElementById('sTouchClear');
+      if (tBtn) tBtn.onclick = async () => {
+        tBtn.disabled = true; tMsg.textContent = 'Detecting panel display…'; tMsg.style.color = '#7e93ab';
+        try {
+          const r = await configApi.setupTouchscreen();
+          if (r && r.ok) { tMsg.textContent = 'Approve the UAC prompt, then tap the crosshairs on the panel (matched ' + r.displayId + ').'; tMsg.style.color = '#7CFFB2'; }
+          else { tMsg.textContent = (r && r.error) || 'Setup failed.'; tMsg.style.color = '#c98'; }
+        } catch (e) { tMsg.textContent = 'Setup failed: ' + (e.message || e); tMsg.style.color = '#c98'; }
+        finally { tBtn.disabled = false; }
+      };
+      if (tClr) tClr.onclick = async () => {
+        if (!window.confirm('Clear touch calibration on every display? You\'ll need to run Set up touchscreen after.')) return;
+        tClr.disabled = true; tMsg.textContent = 'Clearing calibrations…'; tMsg.style.color = '#7e93ab';
+        try {
+          const r = await configApi.clearTouchCalibration();
+          if (r && r.ok) { tMsg.textContent = 'Approve the UAC prompt to clear all calibrations.'; tMsg.style.color = '#7e93ab'; }
+          else { tMsg.textContent = (r && r.error) || 'Clear failed.'; tMsg.style.color = '#c98'; }
+        } catch (e) { tMsg.textContent = 'Clear failed: ' + (e.message || e); tMsg.style.color = '#c98'; }
+        finally { tClr.disabled = false; }
+      };
       document.getElementById('sEffect').onchange = e => live({ effect: parseInt(e.target.value, 10) });
       const cv = document.getElementById('sColorVal');
       document.getElementById('sColor').onchange = e => { const { hue, sat } = hexToHsv(e.target.value); cv.textContent = `H${hue} S${sat}`; live({ hue, sat, accentOverride: true }); sOvr.checked = true; sColEl.disabled = false; };

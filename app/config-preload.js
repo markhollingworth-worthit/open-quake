@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('openQuakeConfig', {
   getAppIcon(value) { return ipcRenderer.invoke('getAppIcon', value); },
   fetchIconUrl(url) { return ipcRenderer.invoke('fetchIconUrl', url); },
   fetchMdiIcon(name) { return ipcRenderer.invoke('fetchMdiIcon', name); },
+  setupTouchscreen() { return ipcRenderer.invoke('setupTouchscreen'); },
+  clearTouchCalibration() { return ipcRenderer.invoke('clearTouchCalibration'); },
   getLighting() { return ipcRenderer.invoke('getLighting'); },
   setLighting(lighting) { ipcRenderer.send('setLighting', lighting); },
   saveLightingToDevice() { return ipcRenderer.invoke('saveLightingToDevice'); },
