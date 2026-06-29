@@ -741,8 +741,49 @@ function effectiveKnob(g) {
   if (g.knobOverride && g.knob) return { turn: g.knob.turn || base.turn, click: g.knob.click || base.click, dblclick: g.knob.dblclick || base.dblclick };
   return base;
 }
+// Place a grid group's tiles into a page's cols x rows, anchored top-left. Cells of the page that
+// fall outside the group's footprint stay blank; tiles in the group whose row/col is outside the
+// page's bounds are cropped. Merged tiles (w>1 / h>1) whose span would extend past the page are
+// dropped entirely so we never emit dangling cover cells. Used by resolveGroupedTiles below and
+// mirrored in the editor (anchorGroupTiles in config.js).
+function anchorGroupTiles(group, pageCols, pageRows) {
+  const gCols = +(group && group.cols) || 0;
+  const gRows = +(group && group.rows) || 0;
+  const pc = +pageCols || 0, pr = +pageRows || 0;
+  if (!gCols || !gRows || !pc || !pr) return [];
+  const out = new Array(pc * pr);
+  for (let i = 0; i < out.length; i++) out[i] = {};
+  const src = (group && Array.isArray(group.tiles)) ? group.tiles : [];
+  for (let r = 0; r < gRows; r++) {
+    for (let c = 0; c < gCols; c++) {
+      if (r >= pr || c >= pc) continue;                  // crop cells outside the page
+      const t = src[r * gCols + c];
+      if (!t || t.cover != null) continue;               // empty or covered-by-merge — handled by owners
+      const w = +t.w || 1, h = +t.h || 1;
+      if (c + w > pc || r + h > pr) continue;            // merged tile's span doesn't fit — drop whole tile
+      const dstIdx = r * pc + c;
+      out[dstIdx] = (w > 1 || h > 1) ? Object.assign({}, t, { w, h }) : Object.assign({}, t);
+      for (let dr = 0; dr < h; dr++) for (let dc = 0; dc < w; dc++) {
+        if (dr === 0 && dc === 0) continue;
+        out[(r + dr) * pc + (c + dc)] = { cover: dstIdx };
+      }
+    }
+  }
+  return out;
+}
+// Return the tile array a page should render — its own g.tiles, or a grid group's tiles
+// anchored into the page's cols/rows. A reference to a missing group falls back silently.
+function resolveGroupedTiles(g) {
+  if (!g || !g.useGroup || !g.groupId) return (g && g.tiles) || [];
+  const groups = Array.isArray(config.groups) ? config.groups : [];
+  const group = groups.find(x => x && x.id === g.groupId);
+  if (!group) return (g.tiles) || [];
+  return anchorGroupTiles(group, g.cols || 0, g.rows || 0);
+}
+
 async function resolveGridIcons(grid) {
   const knob = effectiveKnob(grid);   // resolved from the ORIGINAL kind (apps get converted to 'web' below)
+  const tilesIn = resolveGroupedTiles(grid);
   let out;
   if (grid.kind === 'app') {                                                                          // render the local app in the webview; themed:true -> panel injects live light/dark + accent
     if (grid.app === 'ha-dashboard') {
@@ -753,15 +794,15 @@ async function resolveGridIcons(grid) {
       const baseUrl = String(ha.url || '').replace(/\/+$/, '');
       const dash = String((grid.options || {}).dashboard || 'lovelace').replace(/^\/+/, '');
       const synthetic = { ...grid, kind: 'web', url: baseUrl ? baseUrl + '/' + dash : '', auth: { type: 'ha', token: ha.token || '' }, themed: false };
-      out = grid.gridOn ? { ...synthetic, tiles: await resolveTiles(grid.tiles) } : synthetic;
+      out = grid.gridOn ? { ...synthetic, tiles: await resolveTiles(tilesIn) } : synthetic;
     } else {
       const base = { ...grid, kind: 'web', url: appPageUrl(grid), themed: true };
-      out = grid.gridOn ? { ...base, tiles: await resolveTiles(grid.tiles) } : base;                  // file/app pages with the native button strip -> resolve its tile icons
+      out = grid.gridOn ? { ...base, tiles: await resolveTiles(tilesIn) } : base;                     // file/app pages with the native button strip -> resolve its tile icons
     }
   } else if (grid.kind === 'web') {
-    out = grid.gridOn ? { ...grid, tiles: await resolveTiles(grid.tiles) } : grid;                    // dashboard: resolve the button-grid tile icons, else nothing to resolve
+    out = grid.gridOn ? { ...grid, tiles: await resolveTiles(tilesIn) } : grid;                       // dashboard: resolve the button-grid tile icons, else nothing to resolve
   } else {
-    out = { ...grid, tiles: await resolveTiles(grid.tiles) };
+    out = { ...grid, tiles: await resolveTiles(tilesIn) };
   }
   return Object.assign({}, out, { _knob: knob });
 }

@@ -1,6 +1,8 @@
   const configApi = window.openQuakeConfig;
   let config = { activeGridId: null, grids: [] };
   let gi = 0, ti = -1, selEnd = -1, dragFrom = -1, dirty = false, appDefs = [], view = 'pages', ledState = null, settingsTab = 'software', dashTab = 'page';
+  // Left sidebar tab (Pages vs Groups list) + which group is currently being edited when view='groups'.
+  let leftTab = 'pages', groupIndex = -1;
   // QMK RGB-Matrix effect names — index is the value written to the device (0 = ring off).
   const LED_EFFECTS = ['All Off (ring off)', 'Solid Color', 'Alphas Mods', 'Gradient Up/Down', 'Gradient Left/Right', 'Breathing', 'Band Sat.', 'Band Val.', 'Pinwheel Sat.', 'Pinwheel Val.', 'Spiral Sat.', 'Spiral Val.', 'Cycle All', 'Cycle Left/Right', 'Cycle Up/Down', 'Rainbow Moving Chevron', 'Cycle Out/In', 'Cycle Out/In Dual', 'Cycle Pinwheel', 'Cycle Spiral', 'Dual Beacon', 'Rainbow Beacon', 'Rainbow Pinwheels', 'Raindrops', 'Jellybean Raindrops', 'Hue Breathing', 'Hue Pendulum', 'Hue Wave', 'Pixel Rain', 'Pixel Flow', 'Pixel Fractal', 'Typing Heatmap', 'Digital Rain', 'Solid Reactive Simple', 'Solid Reactive', 'Solid Reactive Wide', 'Solid Reactive Multi Wide', 'Solid Reactive Cross', 'Solid Reactive Multi Cross', 'Solid Reactive Nexus', 'Solid Reactive Multi Nexus', 'Splash', 'Multi Splash', 'Solid Splash', 'Solid Multi Splash'];
   const LED_DEFAULT = { effect: 1, brightness: 200, speed: 128, hue: 128, sat: 255 };
@@ -67,7 +69,73 @@
     return 'rotation';
   }
   const uid = () => 'g' + Math.random().toString(36).slice(2, 8);
-  const curGrid = () => config.grids[gi];
+  // curGrid returns the page being edited (view='pages') OR the group being edited (view='groups').
+  // Pages and groups both have {id, name, cols, rows, tiles[]}, so all the existing tile editor
+  // machinery (renderTiles, renderForm, mergeAt, flattenAt, ensureTiles, …) works on either.
+  const curGrid = () => view === 'groups' ? ((config.groups || [])[groupIndex] || null) : config.grids[gi];
+  const curGroup = () => (config.groups || [])[groupIndex] || null;
+  // Anchor a grid group's tiles into a page's cols×rows, top-left. Mirror of main.js anchorGroupTiles
+  // so the editor's read-only preview matches what the panel will draw. Crops cells past page bounds;
+  // drops merged tiles whose span doesn't fit (rather than emitting dangling cover cells).
+  function anchorGroupTiles(group, pageCols, pageRows) {
+    const gCols = +(group && group.cols) || 0;
+    const gRows = +(group && group.rows) || 0;
+    const pc = +pageCols || 0, pr = +pageRows || 0;
+    if (!gCols || !gRows || !pc || !pr) return [];
+    const out = new Array(pc * pr);
+    for (let i = 0; i < out.length; i++) out[i] = blankTile();
+    const src = (group && Array.isArray(group.tiles)) ? group.tiles : [];
+    for (let r = 0; r < gRows; r++) {
+      for (let c = 0; c < gCols; c++) {
+        if (r >= pr || c >= pc) continue;
+        const t = src[r * gCols + c];
+        if (!t || t.cover != null) continue;
+        const w = +t.w || 1, h = +t.h || 1;
+        if (c + w > pc || r + h > pr) continue;
+        const dstIdx = r * pc + c;
+        out[dstIdx] = (w > 1 || h > 1) ? Object.assign({}, t, { w, h }) : Object.assign({}, t);
+        for (let dr = 0; dr < h; dr++) for (let dc = 0; dc < w; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          out[(r + dr) * pc + (c + dc)] = { cover: dstIdx };
+        }
+      }
+    }
+    return out;
+  }
+  // Find a group by id (or null). Helper for "Use grid group" lookups.
+  function groupById(id) { return (config.groups || []).find(g => g && g.id === id) || null; }
+  // The "Use grid group" row injected into a page's editor (grid pages, dashboards w/ gridOn,
+  // app pages w/ gridOn). Mutually exclusive UI: when the box is on + a group is selected, the
+  // page renders the group's tiles instead of its own. Schedule is a disabled placeholder for
+  // phase 2 (data only).
+  function groupSelectRowHtml(g) {
+    const list = config.groups || [];
+    const cur = g.groupId || '';
+    const missing = !!cur && !list.some(x => x.id === cur);
+    return `<div class="row" style="gap:8px; flex-wrap:wrap">
+      <label style="width:auto">Group</label>
+      <label class="iconopt" style="width:auto"><input type="checkbox" id="gUseGroup" ${(g.useGroup && !missing) ? 'checked' : ''}> Use grid group</label>
+      <select id="gGroupId" style="flex:1; min-width:140px">
+        <option value="">— pick a group —</option>
+        ${list.map(x => `<option value="${esc(x.id)}" ${x.id === cur ? 'selected' : ''}>${esc(x.name || '(unnamed)')}</option>`).join('')}
+        ${missing ? `<option value="${esc(cur)}" selected>(missing — pick another)</option>` : ''}
+      </select>
+      <label class="iconopt" style="width:auto; opacity:0.55" title="Schedule support is coming in the next phase."><input type="checkbox" id="gUseSchedule" ${g.useSchedule ? 'checked' : ''} disabled> Use schedule</label>
+    </div>`;
+  }
+  function wireGroupSelectRow(g) {
+    const useBox = document.getElementById('gUseGroup');
+    const sel = document.getElementById('gGroupId');
+    if (useBox) useBox.onchange = e => { g.useGroup = e.target.checked; markDirty(); render(); };
+    // Picking a group auto-enables the checkbox so the change is visible immediately. Clearing the
+    // selection (empty option) also auto-disables; the user can re-tick once they pick again.
+    if (sel) sel.onchange = e => {
+      g.groupId = e.target.value || '';
+      if (g.groupId && !g.useGroup) g.useGroup = true;
+      if (!g.groupId) g.useGroup = false;
+      markDirty(); render();
+    };
+  }
   const esc = s => (s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   // A masked credential field: a password input + an eyeball to reveal it. attrs = extra input HTML
   // (id / class / data-* / placeholder); wrapStyle = optional style on the wrapper (e.g. a flex weight).
@@ -511,6 +579,7 @@
       <div class="row"><label>Name</label><input id="gName" value="${esc(g.name)}"></div>
       <div class="row"><label>Columns</label><input id="gCols" type="number" min="1" max="12" value="${g.cols}" style="width:90px">
         <label style="width:auto;margin-left:10px">Rows</label><input id="gRows" type="number" min="1" max="6" value="${g.rows}" style="width:90px"></div>
+      ${groupSelectRowHtml(g)}
       ${rotRowHtml(g)}
       ${shortcutRowHtml(g)}
       ${advRowHtml(g)}
@@ -521,7 +590,7 @@
     document.getElementById('gCols').onchange = e => { clearAllMerges(g); g.cols = Math.max(1, Math.min(12, +e.target.value || 1)); ensureTiles(g); ti = -1; selEnd = -1; render(); markDirty(); };
     document.getElementById('gRows').onchange = e => { clearAllMerges(g); g.rows = Math.max(1, Math.min(6, +e.target.value || 1)); ensureTiles(g); ti = -1; selEnd = -1; render(); markDirty(); };
     document.getElementById('gDelete').onclick = deleteCurrentPage;
-    wireRotRow(g); wireShortcutRow(g); wireAdvRow(g);
+    wireGroupSelectRow(g); wireRotRow(g); wireShortcutRow(g); wireAdvRow(g);
   }
 
   // ---- tile cells (with merge/span support) ----
@@ -1030,10 +1099,10 @@
         ${g.gridOn ? `<button id="dtBtns" class="tab${onButtons ? ' on' : ''}">Buttons</button>` : ''}</div>`;
 
     if (onButtons) {   // ---- Buttons tab: strip side + size; the tile editor renders below (in render()) ----
-      el.innerHTML = tabBar + gridSizeRowHtml(g) +
+      el.innerHTML = tabBar + gridSizeRowHtml(g) + groupSelectRowHtml(g) +
         `<p class="hint">A strip of launcher tiles on the chosen side of the dashboard — 2 rows tall, 1–3 columns wide. Edit the tiles below. Uncheck <b>Add a button grid</b> on the Dashboard tab to remove it.</p>`;
       document.getElementById('dtPage').onclick = () => { dashTab = 'page'; render(); };
-      wireGridSizeRow(g);
+      wireGridSizeRow(g); wireGroupSelectRow(g);
       return;
     }
 
@@ -1125,9 +1194,10 @@
 
     if (onButtons) {   // ---- Buttons tab: side + size; the tile editor renders below (in render()) ----
       el.innerHTML = tabBar + gridSizeRowHtml(g, g.app === 'music') +   // Music's grid is pinned right — hide the Side picker
+        groupSelectRowHtml(g) +
         `<p class="hint">A strip of launcher tiles beside the app — 2 rows tall, 1–3 columns wide. Edit the tiles below. Uncheck <b>Add a button grid</b> on the App tab to remove it.</p>`;
       document.getElementById('atPage').onclick = () => { dashTab = 'page'; render(); };
-      wireGridSizeRow(g);
+      wireGridSizeRow(g); wireGroupSelectRow(g);
       return;
     }
 
@@ -1271,11 +1341,125 @@
 
   function render() {
     renderGrids();
+    renderGroups();
+    // Sidebar: which list is visible + which + buttons row + which tab is highlighted.
+    const groupsTab = leftTab === 'groups';
+    const elGL = document.getElementById('gridlist'); if (elGL) elGL.style.display = groupsTab ? 'none' : '';
+    const elGRP = document.getElementById('grouplist'); if (elGRP) elGRP.style.display = groupsTab ? '' : 'none';
+    const elAP = document.getElementById('addPageBtns'); if (elAP) elAP.style.display = groupsTab ? 'none' : '';
+    const elAG = document.getElementById('addGroupBtns'); if (elAG) elAG.style.display = groupsTab ? '' : 'none';
+    const tp = document.getElementById('lTabPages'); if (tp) tp.classList.toggle('on', !groupsTab);
+    const tg = document.getElementById('lTabGroups'); if (tg) tg.classList.toggle('on', groupsTab);
+
     if (view === 'settings') { renderSettings(); return; }
+    if (view === 'groups') { renderGroupMeta(); renderTiles(); renderForm(); return; }
     const g = curGrid();
-    if (g && g.kind === 'web') { renderDashboard(); if (g.gridOn && dashTab === 'buttons') { renderTiles(); renderForm(); } }   // dashboard Buttons tab -> show the tile editor
-    else if (g && g.kind === 'app') { renderAppPage(); const def = appDefs.find(a => a.id === g.app); if ((def && def.grid) || (g.gridOn && dashTab === 'buttons')) { renderTiles(); renderForm(); } }   // built-in grid, or an opted-in button grid on the Buttons tab
-    else { renderMeta(); renderTiles(); renderForm(); }
+    const groupApplied = !!(g && g.useGroup && g.groupId && groupById(g.groupId));
+    const showTileEditor = () => { if (groupApplied) renderGroupAppliedPreview(g); else { renderTiles(); renderForm(); } };
+    if (g && g.kind === 'web') {
+      renderDashboard();
+      if (g.gridOn && dashTab === 'buttons') showTileEditor();
+    } else if (g && g.kind === 'app') {
+      renderAppPage();
+      const def = appDefs.find(a => a.id === g.app);
+      if ((def && def.grid) || (g.gridOn && dashTab === 'buttons')) showTileEditor();
+    } else {
+      renderMeta();
+      showTileEditor();
+    }
+  }
+
+  // ---- groups (left list + slim editor) ----
+  function renderGroups() {
+    const el = document.getElementById('grouplist'); if (!el) return;
+    el.innerHTML = '';
+    const list = config.groups || [];
+    if (!list.length) { el.innerHTML = '<p class="hint" style="margin:6px 4px">No groups yet. Use + Group to create one.</p>'; return; }
+    list.forEach((g, i) => {
+      const d = document.createElement('div');
+      d.className = 'gridrow' + (view === 'groups' && i === groupIndex ? ' active' : '');
+      const left = document.createElement('span'); left.style.cssText = 'display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden';
+      const name = document.createElement('span'); name.textContent = '▦ ' + (g.name || '(unnamed)'); name.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+      left.appendChild(name); d.appendChild(left);
+      d.onclick = () => { view = 'groups'; groupIndex = i; ti = -1; selEnd = -1; render(); };
+      el.appendChild(d);
+    });
+  }
+  function renderGroupMeta() {
+    const g = curGroup(); const el = document.getElementById('gridmeta');
+    if (!g) { el.innerHTML = '<p class="hint">No group selected. Use + Group to create one.</p>'; ['tilegrid','mergebar','tileform','iconpane'].forEach(id => { const e = document.getElementById(id); if (e) e.innerHTML = ''; }); return; }
+    el.innerHTML = `
+      <div class="row"><label>Name</label><input id="gName" value="${esc(g.name)}"></div>
+      <div class="row"><label>Columns</label><input id="gCols" type="number" min="1" max="12" value="${g.cols}" style="width:90px">
+        <label style="width:auto;margin-left:10px">Rows</label><input id="gRows" type="number" min="1" max="6" value="${g.rows}" style="width:90px"></div>
+      <p class="hint">A reusable button layout. Apply it to any page with a grid (Pages tab → that page's <b>Group</b> row). Pages anchor a group top-left and pad or crop to fit.</p>
+      <div class="row"><button class="danger" id="gDelete">Delete group</button></div>`;
+    document.getElementById('gName').oninput = e => { g.name = e.target.value; renderGroups(); markDirty(); };
+    document.getElementById('gCols').onchange = e => { clearAllMerges(g); g.cols = Math.max(1, Math.min(12, +e.target.value || 1)); ensureTiles(g); ti = -1; selEnd = -1; render(); markDirty(); };
+    document.getElementById('gRows').onchange = e => { clearAllMerges(g); g.rows = Math.max(1, Math.min(6, +e.target.value || 1)); ensureTiles(g); ti = -1; selEnd = -1; render(); markDirty(); };
+    document.getElementById('gDelete').onclick = deleteCurrentGroup;
+  }
+  function addGroup() {
+    if (!Array.isArray(config.groups)) config.groups = [];
+    const g = { id: uid(), name: 'New Group', cols: 3, rows: 2, tiles: [] };
+    ensureTiles(g);
+    config.groups.push(g);
+    groupIndex = config.groups.length - 1; ti = -1; selEnd = -1;
+    leftTab = 'groups'; view = 'groups';
+    render(); markDirty();
+  }
+  // Read-only preview: when a page has Use grid group on AND the referenced group exists, render the
+  // anchored tiles in #tilegrid (no click handlers) with a banner in the merge-bar slot pointing the
+  // user to the group editor. The page's own g.tiles are left intact so unchecking Use grid group
+  // restores the manual layout untouched.
+  function renderGroupAppliedPreview(g) {
+    const group = groupById(g.groupId);
+    if (!group) { renderTiles(); renderForm(); return; }
+    ['tileform', 'iconpane'].forEach(id => { const e = document.getElementById(id); if (e) e.innerHTML = ''; });
+    const el = document.getElementById('tilegrid'); if (!el) return;
+    const cw = el.clientWidth || (el.parentElement && el.parentElement.clientWidth) || 600;
+    const cell = Math.max(48, Math.min(150, Math.floor((cw - (g.cols - 1) * 6) / g.cols)));
+    el.style.gridTemplateColumns = `repeat(${g.cols}, ${cell}px)`;
+    el.style.gridTemplateRows = `repeat(${g.rows}, ${cell}px)`;
+    const tiles = anchorGroupTiles(group, g.cols, g.rows);
+    el.innerHTML = '';
+    tiles.forEach((t, i) => {
+      if (t && t.cover != null) return;
+      const c = i % g.cols, r = Math.floor(i / g.cols);
+      const w = +(t && t.w) || 1, h = +(t && t.h) || 1;
+      const empty = !t || !t.type;
+      const d = document.createElement('div');
+      d.className = 'cell' + (empty ? ' empty' : '') + ((w > 1 || h > 1) ? ' span' : '');
+      d.style.gridColumn = `${c + 1} / span ${w}`;
+      d.style.gridRow = `${r + 1} / span ${h}`;
+      d.style.cursor = 'default';
+      d.style.opacity = '0.85';
+      if (!empty) d.innerHTML = iconHtml(t, 'cell') + `<div class="lb">${esc(t.label || '')}</div>`;
+      el.appendChild(d);
+    });
+    const mb = document.getElementById('mergebar');
+    if (mb) {
+      mb.classList.remove('active');
+      mb.innerHTML = `<p class="hint" style="margin:0">Tiles come from group <b>${esc(group.name || '(unnamed)')}</b> — <a href="#" id="goEditGroup" style="color:#7CFFB2">Edit group</a>. Uncheck <b>Use grid group</b> to edit this page's own tiles instead.</p>`;
+      const link = document.getElementById('goEditGroup');
+      if (link) link.onclick = (ev) => {
+        ev.preventDefault();
+        const idx = (config.groups || []).findIndex(x => x.id === g.groupId);
+        if (idx >= 0) { groupIndex = idx; view = 'groups'; leftTab = 'groups'; ti = -1; selEnd = -1; render(); }
+      };
+    }
+  }
+  function deleteCurrentGroup() {
+    const list = config.groups || [];
+    if (groupIndex < 0 || groupIndex >= list.length) return;
+    const removed = list[groupIndex];
+    if (!window.confirm('Delete group "' + (removed.name || '(unnamed)') + '"? Any pages using it will fall back to their own tiles.')) return;
+    // Clear references on pages that used this group.
+    (config.grids || []).forEach(p => { if (p && p.groupId === removed.id) { delete p.groupId; delete p.useGroup; } });
+    list.splice(groupIndex, 1);
+    if (!list.length) { view = 'pages'; leftTab = 'pages'; groupIndex = -1; }
+    else groupIndex = Math.min(groupIndex, list.length - 1);
+    ti = -1; selEnd = -1; render(); markDirty();
   }
 
   // ---- settings page ----
@@ -1692,6 +1876,9 @@
   document.getElementById('addGrid').onclick = () => addPage('grid');
   document.getElementById('addDash').onclick = () => addPage('web');
   document.getElementById('addApp').onclick = () => addPage('app');
+  document.getElementById('addGroup').onclick = () => addGroup();
+  document.getElementById('lTabPages').onclick = () => { leftTab = 'pages'; render(); };
+  document.getElementById('lTabGroups').onclick = () => { leftTab = 'groups'; render(); };
   document.getElementById('saveBtn').onclick = doSave;
   document.getElementById('settingsBtn').onclick = async () => {
     view = view === 'settings' ? 'pages' : 'settings';
@@ -1702,6 +1889,7 @@
 
   (async () => {
     config = await configApi.getConfig(); if (!config.grids) config.grids = [];
+    if (!Array.isArray(config.groups)) config.groups = [];
     try { appDefs = await configApi.getApps(); } catch (e) {}
     try { haCacheLocal = await configApi.getHaCache(); } catch (e) {}   // for iconHtml's HA icon resolution
     render(); setState('');

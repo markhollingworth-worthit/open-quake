@@ -87,9 +87,14 @@
   </header>
   <div class="main">
     <div class="col grids">
-      <p class="sectitle">Pages</p>
+      <div class="tabbar" style="margin-bottom:10px">
+        <button id="lTabPages" class="tab on">Pages</button>
+        <button id="lTabGroups" class="tab">Groups</button>
+      </div>
       <div id="gridlist"></div>
-      <div class="row" style="margin-top:12px; gap:6px; flex-wrap:wrap"><button class="primary" id="addGrid">+ Grid</button><button id="addDash">+ Dashboard</button><button id="addApp">+ App</button></div>
+      <div id="grouplist" style="display:none"></div>
+      <div id="addPageBtns" class="row" style="margin-top:12px; gap:6px; flex-wrap:wrap"><button class="primary" id="addGrid">+ Grid</button><button id="addDash">+ Dashboard</button><button id="addApp">+ App</button></div>
+      <div id="addGroupBtns" class="row" style="margin-top:12px; gap:6px; display:none"><button class="primary" id="addGroup">+ Group</button></div>
     </div>
     <div class="col editor">
       <div id="gridmeta"></div>
