@@ -1,5 +1,7 @@
 'use strict';
-// DK-QUAKE launcher: multi-grid panel + PC config editor, on the open Aris68Connector driver.
+// open-quake launcher: multi-grid panel + PC config editor. Talks to either the DK-QUAKE /
+// ARIS-68 panel (via Aris68Connector) or the open Bedrock RP2040 knob (via BedrockConnector),
+// routed through MultiKnob which picks whichever device is plugged in.
 const { app, BrowserWindow, Tray, Menu, nativeImage, screen, powerSaveBlocker, ipcMain, shell, dialog, session, net, safeStorage, clipboard, globalShortcut, nativeTheme } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -7,7 +9,7 @@ const crypto = require('crypto');
 const { exec, execFile, spawn } = require('child_process');
 const { pathToFileURL } = require('url');
 const HID = require('node-hid');
-const Aris68Connector = require(path.join(__dirname, '..', 'src', 'Aris68Connector'));
+const MultiKnob = require('./multiKnob');                                           // owns Aris68Connector + BedrockConnector; routes to whichever device is plugged in
 const http = require('http');
 const actionRunner = require('./actionRunner');
 const { createMediaKeys } = require('./mediaKeys');
@@ -47,7 +49,7 @@ let serverPort = 0;                      // the local server's ephemeral port (f
 let config = loadConfig();
 let panelWin = null, configWin = null, tray = null;
 let dashSession = null, cookieFlushT = null;   // dashboard webview session + a debounced cookie-store flush
-const dev = new Aris68Connector({ hid: HID });
+const dev = new MultiKnob({ hid: HID });
 function appSettings() { return Object.assign({}, DEFAULT_SETTINGS, config.settings || {}); }
 // ---- theme (global light/dark + accent, with per-card overrides) ----
 function themeGlobal() { return Object.assign({}, THEME_DEFAULT, (config.settings || {}).theme || {}); }
