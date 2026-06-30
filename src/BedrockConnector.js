@@ -56,6 +56,45 @@ const TAG_PING       = 0x15;
 const STATUS_BOOT    = 0x00;
 const STATUS_PONG    = 0x01;
 
+// Aris68 (QMK VIA RGB-Matrix) effect ID -> Bedrock effect ID. Bedrock only implements 5
+// effects (off/solid/breathing/rainbow/chase), so each QMK effect maps to the closest visual
+// equivalent: single-color animations -> breathing, multi-color cycles -> rainbow, moving
+// single-pixel patterns -> chase. IDs not in this table fall through to solid (1) in
+// setLedEffect() so the ring stays visible with the user's chosen color.
+const ARIS68_TO_BEDROCK_EFFECT = {
+   0: 0,   // ALL_OFF                  -> off
+   1: 1,   // SOLID_COLOR              -> solid
+   2: 1,   // ALPHAS_MODS              -> solid
+   3: 2,   // GRADIENT_UP_DOWN         -> breathing
+   4: 2,   // GRADIENT_LEFT_RIGHT      -> breathing
+   5: 2,   // BREATHING                -> breathing
+   6: 2,   // BAND_SAT                 -> breathing
+   7: 2,   // BAND_VAL                 -> breathing
+   8: 4,   // BAND_PINWHEEL_SAT        -> chase
+   9: 4,   // BAND_PINWHEEL_VAL        -> chase
+  10: 4,   // BAND_SPIRAL_SAT          -> chase
+  11: 4,   // BAND_SPIRAL_VAL          -> chase
+  12: 3,   // CYCLE_ALL                -> rainbow
+  13: 3,   // CYCLE_LEFT_RIGHT         -> rainbow
+  14: 3,   // CYCLE_UP_DOWN            -> rainbow
+  15: 3,   // RAINBOW_MOVING_CHEVRON   -> rainbow
+  16: 4,   // CYCLE_OUT_IN             -> chase
+  17: 4,   // CYCLE_OUT_IN_DUAL        -> chase
+  18: 4,   // CYCLE_PINWHEEL           -> chase
+  19: 4,   // CYCLE_SPIRAL             -> chase
+  20: 4,   // DUAL_BEACON              -> chase
+  21: 3,   // RAINBOW_BEACON           -> rainbow
+  22: 3,   // RAINBOW_PINWHEELS        -> rainbow
+  23: 3,   // RAINDROPS                -> rainbow
+  24: 3,   // JELLYBEAN_RAINDROPS      -> rainbow
+  25: 2,   // HUE_BREATHING            -> breathing
+  26: 2,   // HUE_PENDULUM             -> breathing
+  27: 2,   // HUE_WAVE                 -> breathing
+  28: 4,   // PIXEL_RAIN               -> chase
+  29: 4,   // PIXEL_FLOW               -> chase
+  30: 4,   // PIXEL_FRACTAL            -> chase
+};
+
 // HSV(0..255, 0..255, value=255) -> RGB(0..255 × 3). Mirrors the conversion the Aris68 path
 // uses so a caller that has a hue/sat pair (e.g. the launcher's accent-color picker) renders
 // the same color on either device. Standard CSS-style HSV -> RGB.
@@ -195,8 +234,19 @@ class BedrockConnector extends EventEmitter {
     this._lastLighting.brightness = v & 0xFF;
     return this._send(TAG_LED_BRIGHT, v);
   }
-  /** Effect IDs: 0=off, 1=solid, 2=breathing, 3=rainbow, 4=chase. Different space from Aris68. */
+  /**
+   * Accepts a QMK / Aris68 effect ID (0–43) and translates to the closest Bedrock equivalent
+   * (0=off, 1=solid, 2=breathing, 3=rainbow, 4=chase). The launcher UI presents the Aris68
+   * effect list so users get a working result regardless of which effect they pick. For pure
+   * Bedrock-native callers that already have an ID 0–4 in hand, use setLedEffectRaw().
+   */
   setLedEffect(i) {
+    const bedrock = ARIS68_TO_BEDROCK_EFFECT[i & 0xFF];
+    const effect  = (bedrock !== undefined) ? bedrock : 1;       // unknown -> solid (visible default)
+    return this.setLedEffectRaw(effect);
+  }
+  /** Set a Bedrock-native effect ID (0=off, 1=solid, 2=breathing, 3=rainbow, 4=chase). */
+  setLedEffectRaw(i) {
     if (!this._lastLighting) this._lastLighting = {};
     this._lastLighting.effect = i & 0xFF;
     return this._send(TAG_LED_EFFECT, i);
