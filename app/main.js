@@ -1,5 +1,7 @@
 'use strict';
-// DK-QUAKE launcher: multi-grid panel + PC config editor, on the open Aris68Connector driver.
+// open-quake launcher: multi-grid panel + PC config editor. Talks to either the DK-QUAKE /
+// ARIS-68 panel (via Aris68Connector) or the open Bedrock RP2040 knob (via BedrockConnector),
+// routed through MultiKnob which picks whichever device is plugged in.
 const { app, BrowserWindow, Tray, Menu, nativeImage, screen, powerSaveBlocker, ipcMain, shell, dialog, session, net, safeStorage, clipboard, globalShortcut, nativeTheme } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -7,7 +9,7 @@ const crypto = require('crypto');
 const { exec, execFile, spawn } = require('child_process');
 const { pathToFileURL } = require('url');
 const HID = require('node-hid');
-const Aris68Connector = require(path.join(__dirname, '..', 'src', 'Aris68Connector'));
+const MultiKnob = require('./multiKnob');                                           // owns Aris68Connector + BedrockConnector; routes to whichever device is plugged in
 const http = require('http');
 const actionRunner = require('./actionRunner');
 const { createMediaKeys } = require('./mediaKeys');
@@ -15,6 +17,7 @@ const { createSecretStore } = require('./secretStore');
 const nowplaying = require('./nowplaying');   // same singleton sysserver polls — read its snapshot to target transport
 const haschedule = require('./haschedule');   // HA Schedule dev app — fed HA creds from .env, polled while shown
 const haClient = require('./haClient');       // Global HA cache (registries + dashboards); per-entity states fetched lazily
+const touchSetup = require('./touchSetup');   // Bind a touchscreen to its physical display via tabcal.exe (Windows)
 const ahk = require('./ahk');                  // macro "ahk" step backend (shells out to an installed AutoHotkey.exe)
 const HA_SCHEDULE_APPS = ['haschedule', 'agenda', 'events'];   // dev apps backed by the shared HA /haschedule-data snapshot
 
@@ -46,7 +49,7 @@ let serverPort = 0;                      // the local server's ephemeral port (f
 let config = loadConfig();
 let panelWin = null, configWin = null, tray = null;
 let dashSession = null, cookieFlushT = null;   // dashboard webview session + a debounced cookie-store flush
-const dev = new Aris68Connector({ hid: HID });
+const dev = new MultiKnob({ hid: HID });
 function appSettings() { return Object.assign({}, DEFAULT_SETTINGS, config.settings || {}); }
 // ---- theme (global light/dark + accent, with per-card overrides) ----
 function themeGlobal() { return Object.assign({}, THEME_DEFAULT, (config.settings || {}).theme || {}); }
@@ -1408,6 +1411,21 @@ app.whenReady().then(async () => {
   ipcMain.on('imageToDataUrl', (e, filePath) => { e.returnValue = isFrom(e, configWin) ? (imageFileToDataUrl(filePath) || '') : ''; });
   ipcMain.handle('fetchIconUrl', (e, url) => isFrom(e, configWin) ? fetchIconToCache(url) : { ok: false, error: 'unauthorized' });
   ipcMain.handle('fetchMdiIcon', (e, name) => isFrom(e, configWin) ? fetchMdiToCache(name) : { ok: false, error: 'unauthorized' });
+  // Bind the touchscreen to its physical display via multidigimon -touch (Windows). This launches
+  // the built-in "Tap this screen with a single finger to identify it as a touch screen" wizard
+  // that Microsoft hid behind the broken-in-24H2 Tablet PC Settings UI. The wizard writes a
+  // persistent override under HKLM\SOFTWARE\Microsoft\Wisp\Pen\Digimon that survives primary-
+  // display swaps, sleep, and reboot.
+  ipcMain.handle('setupTouchscreen', async (e) => {
+    if (!isFrom(e, configWin)) return { ok: false, error: 'unauthorized' };
+    if (process.platform !== 'win32') return { ok: false, error: 'Touchscreen setup is Windows-only.' };
+    return touchSetup.runMultidigimon();
+  });
+  ipcMain.handle('clearTouchCalibration', (e) => {
+    if (!isFrom(e, configWin)) return { ok: false, error: 'unauthorized' };
+    if (process.platform !== 'win32') return { ok: false, error: 'Touchscreen setup is Windows-only.' };
+    return touchSetup.clearAllCalibrations();
+  });
 
   ipcMain.handle('saveLightingToDevice', (e) => { if (!isFrom(e, configWin)) return false; try { return dev.saveLighting(); } catch (er) { return false; } });
 

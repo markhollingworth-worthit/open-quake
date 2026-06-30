@@ -56,6 +56,28 @@ keeps the mouse and touch aligned with what you see. open-quake auto-rotates its
 render if you leave it portrait, but then a desktop mouse moved onto the panel
 reads 90° off.
 
+If your taps land on the **wrong monitor** (Windows binds touch to the primary
+display by default for any HID touchscreen that doesn't include the proper
+Container ID in its USB descriptor — which most generic HDMI touchscreens don't),
+open the editor → **Settings → Hardware → Set up touchscreen**. That launches
+Windows' built-in `multidigimon -touch` wizard, the same backend tool Tablet PC
+Settings → Setup → Touch Input used to fire before Microsoft broke that UI in
+Win 11 24H2.
+
+**How to drive the wizard:** Accept the UAC prompt. The wizard shows
+*"Tap this screen with a single finger to identify it as a touch screen — if
+this is not the touch screen, press Enter to move to the next screen"* on each
+display in sequence, starting with your primary. **Press Enter on your keyboard
+to skip past every monitor that isn't the panel.** Only when the prompt window
+appears on the 480-tall panel itself do you tap the panel with your finger.
+That writes a persistent override under
+`HKLM\SOFTWARE\Microsoft\Wisp\Pen\Digimon` that survives reboot, sleep, USB
+reconnect, and primary-display swaps.
+
+**Clear all calibrations** is only for fixing stale `tabcal` coordinate
+calibration (taps land on the right display but slightly off). You don't
+normally need it for initial binding — `Set up touchscreen` alone is sufficient.
+
 ## Code layout
 
 ```
