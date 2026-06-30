@@ -1,18 +1,26 @@
 'use strict';
 /*
- * touchSetup.js — bind a touchscreen to its physical display on Windows. Wraps tabcal.exe (built
- * into System32) with elevation so the user just clicks "Set up touchscreen" instead of doing
- * the PowerShell archaeology Microsoft requires to find the right \\.\DISPLAY# name.
+ * touchSetup.js — bind a touchscreen to its physical display on Windows.
  *
- * The Tablet PC Settings → Setup UI was removed / broken in Win 11 24H2, and the underlying
- * \\.\DISPLAY# numbering is independent of the "Monitor 1/2/3" labels in Settings (it follows
- * Windows' internal enumeration order, not Settings' drag-reorderable layout). We bridge by
- * enumerating each \\.\DISPLAY#'s bounds via System.Windows.Forms.Screen and matching against
- * the Electron Display object open-quake already identifies as the panel (deviceDisplay()).
+ * Two operations:
+ *   - runMultidigimon() — launches Windows' built-in `multidigimon -touch` wizard ("Tap this
+ *     screen with a single finger to identify it as a touch screen"). This is what writes the
+ *     persistent digitizer→display binding under HKLM\SOFTWARE\Microsoft\Wisp\Pen\Digimon.
+ *     Tablet PC Settings → Setup → Touch Input used to fire the same wizard, but that UI is
+ *     hidden / broken in Win 11 24H2. multidigimon -touch is the same backend tool, callable
+ *     directly. Binding persists across primary-display swaps, sleep, USB reconnect, reboot.
+ *   - runTabcal(displayId) — fine COORDINATE calibration (after binding is correct). Separate
+ *     concern; use only if taps land on the right display but slightly off-target.
+ *
+ * Both run elevated via a temp .ps1 file — sidesteps the PowerShell quoting nightmares of
+ * passing complex args through nested -Command strings (UAC would silently never appear).
  *
  * No-op on macOS / Linux.
  */
 const { spawn } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 // Enumerate Windows displays with their device name + bounds. Returns [] off Windows or on failure.
 function enumDisplays() {
@@ -44,21 +52,46 @@ async function findDisplayId(panel) {
   return hit ? hit.deviceName : null;
 }
 
-// Spawn tabcal.exe elevated (one UAC prompt). The user then taps the crosshairs on the panel and
-// Windows binds touch input to that display. We can't easily learn whether they completed the
-// dialog — fire and forget. Returns immediately with what we kicked off.
+// Run a command elevated via a temp .ps1 file. Used by both runMultidigimon and runTabcal so the
+// quoting / UAC plumbing is identical for both. Returns a Promise of { ok, scriptPath, error? }.
+function runElevatedScript(scriptBody, tag) {
+  const script = scriptBody.endsWith('\r\n') ? scriptBody : scriptBody + '\r\n';
+  const tempPath = path.join(os.tmpdir(), 'oq-' + tag + '-' + Date.now() + '.ps1');
+  try { fs.writeFileSync(tempPath, script, 'utf8'); }
+  catch (e) { return Promise.resolve({ ok: false, error: 'temp script write failed: ' + e.message }); }
+  const outer = `Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','${tempPath.replace(/'/g, "''")}' -Verb RunAs`;
+  console.log('[touchSetup] ' + tag + ' scriptPath=' + tempPath + ' contents=' + JSON.stringify(script.trim()));
+  return new Promise(resolve => {
+    const child = spawn('powershell.exe', ['-NoProfile', '-Command', outer], { windowsHide: true });
+    let out = '', err = '';
+    child.stdout.on('data', d => { out += d.toString(); });
+    child.stderr.on('data', d => { err += d.toString(); });
+    child.on('error', e => { console.log('[touchSetup] ' + tag + ' spawn error:', e.message); resolve({ ok: false, error: 'spawn: ' + e.message }); });
+    child.on('close', code => {
+      console.log('[touchSetup] ' + tag + ' PS exit=' + code + (out.trim() ? ' stdout=' + out.trim() : '') + (err.trim() ? ' stderr=' + err.trim() : ''));
+      setTimeout(() => { try { fs.unlinkSync(tempPath); } catch (e) {} }, 60000);
+      if (code !== 0) return resolve({ ok: false, error: 'PowerShell exit ' + code + (err.trim() ? ': ' + err.trim() : '') });
+      resolve({ ok: true, scriptPath: tempPath });
+    });
+  });
+}
+
+// Launch Windows' built-in touch-identify wizard. The user taps the panel when its prompt appears
+// and Windows writes the persistent binding. DOES NOT need a DisplayID — the wizard identifies the
+// display from where the tap came.
+function runMultidigimon() {
+  if (process.platform !== 'win32') return Promise.resolve({ ok: false, error: 'Windows only' });
+  return runElevatedScript('multidigimon.exe -touch', 'multidigimon');
+}
+
+// Fine coordinate calibration on a specific display, AFTER binding is correct. Separate concern
+// from runMultidigimon; users only need this if their taps land on the right display but slightly
+// off. DeviceKind=touch is REQUIRED — without it tabcal defaults to pen calibration and silently
+// ignores finger touches.
 function runTabcal(displayId) {
-  if (process.platform !== 'win32') return { ok: false, error: 'Windows only' };
-  if (!displayId) return { ok: false, error: 'no display id' };
-  // Single-quoted PS strings are literal — backslashes in the DisplayID pass through verbatim.
-  const ps = `Start-Process -FilePath tabcal.exe -ArgumentList 'LinCal','DisplayID=${displayId}' -Verb RunAs`;
-  try {
-    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true, detached: true, stdio: 'ignore' });
-    child.unref();
-    return { ok: true, displayId };
-  } catch (e) {
-    return { ok: false, error: e.message || String(e) };
-  }
+  if (process.platform !== 'win32') return Promise.resolve({ ok: false, error: 'Windows only' });
+  if (!displayId) return Promise.resolve({ ok: false, error: 'no display id' });
+  return runElevatedScript(`tabcal.exe LinCal DeviceKind=touch DisplayID=${displayId}`, 'tabcal');
 }
 
 // Clear stale calibration on every display so a fresh LinCal binds cleanly. Useful when the user
@@ -66,7 +99,8 @@ function runTabcal(displayId) {
 function clearAllCalibrations() {
   if (process.platform !== 'win32') return { ok: false, error: 'Windows only' };
   // Build a chained command so one UAC prompt covers all the ClearCal calls.
-  const ps = "Add-Type -AssemblyName System.Windows.Forms; $ids = [System.Windows.Forms.Screen]::AllScreens | ForEach-Object { $_.DeviceName }; $cmd = ($ids | ForEach-Object { 'tabcal.exe ClearCal DisplayID=' + $_ }) -join ' ; '; Start-Process powershell.exe -ArgumentList '-NoProfile','-Command',$cmd -Verb RunAs -WindowStyle Hidden";
+  // DeviceKind=touch is REQUIRED — without it ClearCal targets pen calibration data, not touch.
+  const ps = "Add-Type -AssemblyName System.Windows.Forms; $ids = [System.Windows.Forms.Screen]::AllScreens | ForEach-Object { $_.DeviceName }; $cmd = ($ids | ForEach-Object { 'tabcal.exe ClearCal DeviceKind=touch DisplayID=' + $_ }) -join ' ; '; Start-Process powershell.exe -ArgumentList '-NoProfile','-Command',$cmd -Verb RunAs -WindowStyle Hidden";
   try {
     const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true, detached: true, stdio: 'ignore' });
     child.unref();
@@ -76,4 +110,4 @@ function clearAllCalibrations() {
   }
 }
 
-module.exports = { enumDisplays, findDisplayId, runTabcal, clearAllCalibrations };
+module.exports = { enumDisplays, findDisplayId, runMultidigimon, runTabcal, clearAllCalibrations };

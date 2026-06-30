@@ -1409,19 +1409,15 @@ app.whenReady().then(async () => {
   ipcMain.on('imageToDataUrl', (e, filePath) => { e.returnValue = isFrom(e, configWin) ? (imageFileToDataUrl(filePath) || '') : ''; });
   ipcMain.handle('fetchIconUrl', (e, url) => isFrom(e, configWin) ? fetchIconToCache(url) : { ok: false, error: 'unauthorized' });
   ipcMain.handle('fetchMdiIcon', (e, name) => isFrom(e, configWin) ? fetchMdiToCache(name) : { ok: false, error: 'unauthorized' });
-  // Bind the touchscreen to its physical display via tabcal.exe (Windows). open-quake already
-  // identifies the panel display by its 1920x480 dimensions (deviceDisplay()); touchSetup
-  // cross-references that against the \\.\DISPLAY# enumeration so the user doesn't have to.
+  // Bind the touchscreen to its physical display via multidigimon -touch (Windows). This launches
+  // the built-in "Tap this screen with a single finger to identify it as a touch screen" wizard
+  // that Microsoft hid behind the broken-in-24H2 Tablet PC Settings UI. The wizard writes a
+  // persistent override under HKLM\SOFTWARE\Microsoft\Wisp\Pen\Digimon that survives primary-
+  // display swaps, sleep, and reboot.
   ipcMain.handle('setupTouchscreen', async (e) => {
     if (!isFrom(e, configWin)) return { ok: false, error: 'unauthorized' };
     if (process.platform !== 'win32') return { ok: false, error: 'Touchscreen setup is Windows-only.' };
-    const panel = deviceDisplay();
-    if (!panel) return { ok: false, error: 'Panel display not detected — plug in the panel first (Windows should see it as a 1920×480 monitor).' };
-    const displayId = await touchSetup.findDisplayId(panel);
-    if (!displayId) return { ok: false, error: "Couldn't match the panel display to a Windows DISPLAY# name." };
-    const r = touchSetup.runTabcal(displayId);
-    if (!r.ok) return r;
-    return { ok: true, displayId };
+    return touchSetup.runMultidigimon();
   });
   ipcMain.handle('clearTouchCalibration', (e) => {
     if (!isFrom(e, configWin)) return { ok: false, error: 'unauthorized' };
