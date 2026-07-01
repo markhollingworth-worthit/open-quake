@@ -370,6 +370,9 @@
       <div class="row" style="margin-top:8px"><label style="width:auto">Home page</label>
         <label class="iconopt" style="width:auto"><input type="checkbox" id="gHome" ${isHome ? 'checked' : ''}> Set as home page</label></div>
       <p class="hint">When set, the knob's <b>Go to home page</b> action (Settings → Hardware) jumps here. Only one page can be the home page at a time.</p>
+      <div class="row" style="margin-top:8px"><label style="width:auto">Hidden</label>
+        <label class="iconopt" style="width:auto"><input type="checkbox" id="gHidden" ${g.hidden ? 'checked' : ''}> Hide from page menu &amp; rotation</label></div>
+      <p class="hint">Skips this page in the double-tap page menu, knob-turn cycling, and auto-rotation — without deleting it. Still reachable via its keyboard shortcut, if it has one. Handy for a page you want to park (e.g. a media dashboard) and bring back later.</p>
       <div class="row" style="margin-top:8px"><label style="width:auto">Appearance</label>
         <label class="iconopt" style="width:auto"><input type="checkbox" id="gAprOn" ${hasApr ? 'checked' : ''}> Override</label>
         <select id="gApr" style="width:130px;margin-left:8px" ${hasApr ? '' : 'disabled'}>
@@ -427,6 +430,17 @@
         if (config.homePageId === g.id) delete config.homePageId;
       }
       markDirty();
+    };
+    const ghide = document.getElementById('gHidden');
+    if (ghide) ghide.onchange = e => {
+      if (e.target.checked && config.homePageId === g.id) {
+        window.alert('This page is set as the home page and can\'t be hidden. Pick a new home page first, then hide this one.');
+        e.target.checked = false;
+        return;
+      }
+      g.hidden = e.target.checked;
+      markDirty();
+      renderGrids();
     };
     const kOn = document.getElementById('gKnobOn');
     if (kOn) kOn.onchange = e => { g.knobOverride = e.target.checked; if (g.knobOverride && !g.knob) g.knob = { turn: 'pages', click: 'rotation', dblclick: 'selector' }; markDirty(); render(); };
@@ -547,8 +561,9 @@
       const tag = g.kind === 'web' ? '🌐' : g.kind === 'app' ? '🧩' : '▦';
       const left = document.createElement('span'); left.style.cssText = 'display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden';
       const grip = document.createElement('span'); grip.className = 'griphandle'; grip.title = 'Drag to reorder'; grip.textContent = '☰';
-      const name = document.createElement('span'); name.textContent = `${tag} ${g.name || '(unnamed)'}`; name.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+      const name = document.createElement('span'); name.textContent = `${tag} ${g.name || '(unnamed)'}`; name.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap' + (g.hidden ? ';opacity:.55;font-style:italic' : '');
       left.appendChild(grip); left.appendChild(name); d.appendChild(left);
+      if (g.hidden) { const b = document.createElement('span'); b.className = 'badge'; b.title = 'Hidden from page menu, knob cycling, and rotation'; b.textContent = '🚫👁'; d.appendChild(b); }
       if (g.shortcut) { const b = document.createElement('span'); b.className = 'badge'; b.title = 'Shortcut'; b.textContent = g.shortcut; d.appendChild(b); }
       d.onclick = () => { view = 'pages'; gi = i; ti = -1; selEnd = -1; render(); };
       d.draggable = true;

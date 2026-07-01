@@ -434,7 +434,7 @@ function activeServedAppConfig(appId) {
 // itself but falls back to plaintext on disk (see decrypt passthrough on the next load).
 function saveConfig() { try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(secretStore.encryptConfig(config), null, 2)); } catch (e) { console.log('config save error:', e.message); } }
 function activeGrid() { return config.grids.find(g => g.id === config.activeGridId) || config.grids[0] || { cols: 8, rows: 2, tiles: [] }; }
-function gridList() { return config.grids.map(g => ({ id: g.id, name: g.name })); }
+function gridList() { return config.grids.filter(g => !g.hidden).map(g => ({ id: g.id, name: g.name })); }
 // Tell the local server which served page is on screen so it runs only that page's poller
 // (SystemView metrics / Music now-playing) and idles the rest — no background polling while hidden.
 function syncPollers(g) {
@@ -1099,7 +1099,7 @@ function rotationCfg() {
   };
 }
 function pageCategory(g) { return g.kind === 'web' ? 'dashboards' : g.kind === 'app' ? 'apps' : 'grids'; }
-function rotationList() { const c = rotationCfg(); return config.grids.filter(g => g.rotate && c.cats[pageCategory(g)]); }
+function rotationList() { const c = rotationCfg(); return config.grids.filter(g => g.rotate && c.cats[pageCategory(g)] && !g.hidden); }
 function gotoGrid(id, persist) {
   if (!config.grids.some(g => g.id === id)) return;
   config.activeGridId = id; if (persist) saveConfig(); pushToPanel();
