@@ -18,6 +18,7 @@ const nowplaying = require('./nowplaying');   // same singleton sysserver polls 
 const haschedule = require('./haschedule');   // HA Schedule dev app — fed HA creds from .env, polled while shown
 const haClient = require('./haClient');       // Global HA cache (registries + dashboards); per-entity states fetched lazily
 const touchSetup = require('./touchSetup');   // Bind a touchscreen to its physical display via tabcal.exe (Windows)
+const meetingControl = require('./meetingControl');   // Zoom/Teams call-control keystrokes (Meeting app page)
 const ahk = require('./ahk');                  // macro "ahk" step backend (shells out to an installed AutoHotkey.exe)
 const HA_SCHEDULE_APPS = ['haschedule', 'agenda', 'events'];   // dev apps backed by the shared HA /haschedule-data snapshot
 
@@ -930,6 +931,34 @@ function mediaKey(cmd) {
   return mediaKeys.transport(cmd);
 }
 
+// Meeting app page: routes a button press to the right mechanism. 'system' is OS-level volume
+// (platform-agnostic); 'zoom' sends Zoom's default keybind unless the user has turned off "Use
+// Zoom's default keymappings" in the app's Options, in which case it sends their custom combo —
+// either way, whether it works while Zoom isn't focused depends on Zoom's own "Enable Global
+// Shortcut" checkbox for that action; 'teams' force-focuses Teams first since its remaining
+// shortcuts require focus (the local API that used to allow background control was retired by
+// Microsoft on 2026-06-30 — see PROJECT.md).
+const ZOOM_OPTION_KEY = { mute: 'zoomMute', video: 'zoomVideo', accept: 'zoomAccept', decline: 'zoomDecline', leave: 'zoomLeave' };
+async function onMeetingActionRequest(platform, action) {
+  if (platform === 'system') {
+    if (action === 'volup') { mediaKeys.volume(1); return { ok: true }; }
+    if (action === 'voldown') { mediaKeys.volume(-1); return { ok: true }; }
+    return { ok: false, error: 'unknown system action: ' + action };
+  }
+  if (platform === 'zoom') {
+    const optKey = ZOOM_OPTION_KEY[action];
+    if (!optKey) return { ok: false, error: 'unknown Zoom action: ' + action };
+    const cfg = activeServedAppConfig('meeting');
+    const opts = (cfg && cfg.options) || {};
+    // Default to Zoom's own shipped keybinds (matches Zoom out of the box, no setup needed);
+    // only fall through to the user's custom combo when they've explicitly turned defaults off.
+    const combo = opts.zoomUseDefaults === false ? opts[optKey] : meetingControl.ZOOM_DEFAULT_COMBO[action];
+    return meetingControl.sendZoomAction(combo, { mediaKeys });
+  }
+  if (platform === 'teams') return meetingControl.sendTeamsAction(action, { mediaKeys });
+  return { ok: false, error: 'unknown platform: ' + platform };
+}
+
 function deviceDisplay() {
   return screen.getAllDisplays().find(d => (d.bounds.width === 480 && d.bounds.height === 1920) || (d.bounds.width === 1920 && d.bounds.height === 480));
 }
@@ -1272,7 +1301,7 @@ app.whenReady().then(async () => {
   // Lazy-required so a metrics/load failure can never crash the rest of the app.
   try {
     sysserver = require('./sysserver');
-    serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onAppLaunch, getGridTiles: getActiveAppTiles, getAppConfig: activeServedAppConfig, onOpenExternal: openExternalUrl, appFolders: discoveredServedApps() });
+    serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onAppLaunch, getGridTiles: getActiveAppTiles, getAppConfig: activeServedAppConfig, onOpenExternal: openExternalUrl, onMeetingAction: onMeetingActionRequest, appFolders: discoveredServedApps() });
     ensureSystemViewPage(serverPort); ensureMusicPage(); ensureDropInDir();
     const haUrl = configureHaSchedule();
     console.log('SystemView + Music on http://127.0.0.1:' + serverPort + (haUrl ? ' · HA Schedule -> ' + haUrl : ''));

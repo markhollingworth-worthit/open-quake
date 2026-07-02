@@ -1142,6 +1142,7 @@
       <p class="hint">Adds a strip of launcher tiles beside the web view — pick the side, size, and tiles on the <b>Buttons</b> tab that appears.</p>
       ${rotRowHtml(g)}
       ${shortcutRowHtml(g)}
+      ${advRowHtml(g)}
       <div class="row" style="margin-top:10px"><button class="danger" id="gDelete">Delete page</button></div>
       <p class="hint" id="authHint"></p>
       <p class="hint">Shown full-screen on the panel. Knob scrolls · tap clicks · double-click the knob returns to the page selector.</p>`;
