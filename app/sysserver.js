@@ -49,6 +49,7 @@ const STATIC_FILES = {
   '/owui-widget.css': 'text/css; charset=utf-8',
   '/sysview.js': 'application/javascript; charset=utf-8',
   '/musicview.js': 'application/javascript; charset=utf-8',
+  '/meetingview.js': 'application/javascript; charset=utf-8',
   '/chatview-config.js': 'application/javascript; charset=utf-8',
   '/chatview-main.js': 'application/javascript; charset=utf-8',
   '/chatview-ptt.js': 'application/javascript; charset=utf-8',
@@ -57,8 +58,8 @@ const STATIC_FILES = {
   '/schedule-app.js': 'application/javascript; charset=utf-8',
 };
 
-let server = null, onMedia = null, onLaunch = null, getGridTiles = null, getAppConfig = null, onOpenExternal = null;
-let sysHtml = FALLBACK, musicHtml = FALLBACK, chatHtml = FALLBACK, hascheduleHtml = FALLBACK, agendaHtml = FALLBACK, eventsHtml = FALLBACK;
+let server = null, onMedia = null, onLaunch = null, getGridTiles = null, getAppConfig = null, onOpenExternal = null, onMeetingAction = null;
+let sysHtml = FALLBACK, musicHtml = FALLBACK, chatHtml = FALLBACK, hascheduleHtml = FALLBACK, agendaHtml = FALLBACK, eventsHtml = FALLBACK, meetingHtml = FALLBACK;
 const staticAssets = {};   // request path -> { body, type }; populated at start()
 let appFolders = {};        // drop-in served app id -> { root, proxy }; supplied by main.js
 const appServers = {};      // app id -> required server module
@@ -308,6 +309,7 @@ async function handler(req, res) {
   const url = full.split('?')[0];
   if (url === '/' || url === '/index.html') return html(res, sysHtml);
   if (url === '/music') return html(res, musicHtml);
+  if (url === '/meeting') return html(res, meetingHtml);
   if (url === '/chat') return html(res, chatHtml);
   if (url === '/haschedule') return html(res, hascheduleHtml);
   if (url === '/agenda') return html(res, agendaHtml);
@@ -346,6 +348,18 @@ async function handler(req, res) {
     if (MEDIA_CMDS[cmd] && typeof onMedia === 'function') { try { ok = !!onMedia(cmd); } catch (e) {} }
     return done(res, ok);
   }
+  if (url.indexOf('/meeting-action/') === 0) {
+    const rest = url.slice('/meeting-action/'.length);
+    const slash = rest.indexOf('/');
+    const platform = slash < 0 ? '' : rest.slice(0, slash);
+    const action = slash < 0 ? '' : rest.slice(slash + 1);
+    let result = { ok: false, error: 'not wired' };
+    if (platform && action && typeof onMeetingAction === 'function') {
+      try { result = await onMeetingAction(platform, action); }
+      catch (e) { result = { ok: false, error: e.message || 'meeting action failed' }; }
+    }
+    return json(res, result);
+  }
   if (url === '/launch') {
     const m = /[?&]i=(\d+)/.exec(full);
     let ok = false;
@@ -365,12 +379,14 @@ function start(opts) {
   getGridTiles = opts.getGridTiles || null;
   getAppConfig = opts.getAppConfig || null;
   onOpenExternal = opts.onOpenExternal || null;
+  onMeetingAction = opts.onMeetingAction || null;
   setAppFolders(opts.appFolders);
   nowplaying.setProvider(opts.getNowPlaying || null);
   return new Promise((resolve, reject) => {
     if (server) return resolve(server.address().port);
     try { sysHtml = fs.readFileSync(path.join(__dirname, 'sysview.html'), 'utf8'); } catch (e) {}
     try { musicHtml = fs.readFileSync(path.join(__dirname, 'musicview.html'), 'utf8'); } catch (e) {}
+    try { meetingHtml = fs.readFileSync(path.join(__dirname, 'meetingview.html'), 'utf8'); } catch (e) {}
     try { chatHtml = fs.readFileSync(path.join(__dirname, 'chatview.html'), 'utf8'); } catch (e) {}
     try { hascheduleHtml = fs.readFileSync(path.join(__dirname, 'haschedule.html'), 'utf8'); } catch (e) {}
     try { agendaHtml = fs.readFileSync(path.join(__dirname, 'agenda.html'), 'utf8'); } catch (e) {}

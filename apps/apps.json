@@ -35,6 +35,72 @@
     ]
   },
   {
+    "id": "meeting",
+    "name": "Meeting",
+    "file": "meetingview.html",
+    "served": true,
+    "options": [
+      {
+        "key": "defaultPlatform",
+        "label": "Default platform",
+        "type": "select",
+        "default": "zoom",
+        "choices": [
+          ["zoom", "Zoom"],
+          ["teams", "Teams"]
+        ],
+        "help": "Which platform the Meeting page opens to. Switching tabs on the panel still works for a one-off call on the other platform; this just sets what shows up by default."
+      },
+      {
+        "key": "zoomUseDefaults",
+        "label": "Use Zoom's default keymappings",
+        "type": "bool",
+        "default": true,
+        "help": "Zoom ships with these combos already bound (Alt+A mute, Alt+V video, Ctrl+Shift+A/D phone accept/decline, Alt+Q leave) — if you haven't changed Zoom's own Keyboard Shortcuts, leave this on and there's nothing to configure. Turn it off only if you've remapped these in Zoom yourself."
+      },
+      {
+        "key": "zoomMute",
+        "label": "Zoom: Mute/unmute combo",
+        "type": "text",
+        "default": "alt+a",
+        "help": "Zoom default: Alt+A (\"Mute/Unmute Audio\"). Must match whatever's actually assigned in Zoom → Settings → Keyboard Shortcuts, with \"Enable Global Shortcut\" checked so it works even when Zoom isn't focused.",
+        "showIf": { "key": "zoomUseDefaults", "value": false }
+      },
+      {
+        "key": "zoomVideo",
+        "label": "Zoom: Start/stop video combo",
+        "type": "text",
+        "default": "alt+v",
+        "help": "Zoom default: Alt+V (\"Start/Stop Video\").",
+        "showIf": { "key": "zoomUseDefaults", "value": false }
+      },
+      {
+        "key": "zoomAccept",
+        "label": "Zoom: Accept inbound call combo",
+        "type": "text",
+        "default": "control+shift+a",
+        "help": "Zoom default: Ctrl+Shift+A (Zoom Phone's \"Accept inbound call\").",
+        "showIf": { "key": "zoomUseDefaults", "value": false }
+      },
+      {
+        "key": "zoomDecline",
+        "label": "Zoom: Decline inbound call combo",
+        "type": "text",
+        "default": "control+shift+d",
+        "help": "Zoom default: Ctrl+Shift+D (Zoom Phone's \"Decline inbound call\").",
+        "showIf": { "key": "zoomUseDefaults", "value": false }
+      },
+      {
+        "key": "zoomLeave",
+        "label": "Zoom: Leave meeting combo",
+        "type": "text",
+        "default": "alt+q",
+        "help": "Zoom default: Alt+Q (\"Display prompt to end or leave meeting\") — this opens Zoom's leave/end confirmation dialog rather than leaving instantly; you'll still need to confirm it once (in Zoom, via mouse or Enter).",
+        "showIf": { "key": "zoomUseDefaults", "value": false }
+      }
+    ]
+  },
+  {
     "id": "music",
     "name": "Music",
     "file": "musicview.html",
