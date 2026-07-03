@@ -19,6 +19,7 @@ const haschedule = require('./haschedule');   // HA Schedule dev app — fed HA 
 const haClient = require('./haClient');       // Global HA cache (registries + dashboards); per-entity states fetched lazily
 const touchSetup = require('./touchSetup');   // Bind a touchscreen to its physical display via tabcal.exe (Windows)
 const meetingControl = require('./meetingControl');   // Zoom/Teams call-control keystrokes (Meeting app page)
+const desktopFocus = require('./desktopFocus');   // tracks the PC's OS-level foreground app; auto-switches the panel to a mapped page
 const ahk = require('./ahk');                  // macro "ahk" step backend (shells out to an installed AutoHotkey.exe)
 const HA_SCHEDULE_APPS = ['haschedule', 'agenda', 'events'];   // dev apps backed by the shared HA /haschedule-data snapshot
 
@@ -37,6 +38,7 @@ let firstRun = false;     // set by loadConfig when there was no prior config (f
 let micState = false;     // current device mic state (LED follows it)
 let lastRingEffect = LED_DEFAULT.effect; // remembered so the tray on/off toggle can restore the prior effect
 let rotateRunning = false;               // screen-rotation runtime on/off (starts per settings on launch)
+let rotationSuspended = false;           // temporarily held off by desktop-focus (a mapped app currently has focus)
 let rotTimer = null;
 let monitorMode = false;                 // monitor mode: panel UI hidden so the device shows the Windows desktop
 // Global HA cache — registries + dashboards in memory, per-entity states populated on demand.
@@ -1180,7 +1182,7 @@ function rotateTick() {
 }
 function scheduleRotation() {
   if (rotTimer) { clearTimeout(rotTimer); rotTimer = null; }
-  if (!rotateRunning) return;
+  if (!rotateRunning || rotationSuspended) return;
   rotTimer = setTimeout(() => { rotateTick(); scheduleRotation(); }, rotationCfg().interval * 1000);
 }
 function pushRotationState() {
@@ -1195,6 +1197,37 @@ function applyRotationSettings(wasEnabled) {
   if (!enabled) rotateRunning = false;
   else if (!wasEnabled) rotateRunning = true;
   scheduleRotation(); refreshTray(); pushRotationState();
+}
+
+// ---- desktop focus (panel auto-follows the PC's foreground app) ----
+function focusFollowCfg() { const f = (config.settings && config.settings.focusFollow) || {}; return { enabled: !!f.enabled, pauseRotation: !!f.pauseRotation }; }
+// The page (if any) mapped to whatever app currently holds OS foreground focus, per desktopFocus.js's own
+// debounced/committed value — not the raw poll, so this agrees with whatever page onForegroundAppChange last acted on.
+function currentFocusMatch() {
+  if (!focusFollowCfg().enabled) return null;
+  const name = desktopFocus.getCommittedProcess();
+  if (!name) return null;
+  const lower = name.toLowerCase();
+  return (config.grids || []).find(x => !x.hidden && Array.isArray(x.focusApps) && x.focusApps.some(a => String(a).toLowerCase() === lower)) || null;
+}
+// Re-derives (never toggles blindly) whether rotation should be held off for focus right now, so it self-corrects
+// regardless of call order: settings changes, focus changes, and manual rotation on/off can all trigger this.
+function refreshFocusRotationPause() {
+  const shouldPause = !!(focusFollowCfg().pauseRotation && currentFocusMatch());
+  if (shouldPause === rotationSuspended) return;
+  rotationSuspended = shouldPause;
+  scheduleRotation(); refreshTray(); pushRotationState();
+}
+// Debounced (desktopFocus.js) foreground-process change -> switch to the first visible page that maps it.
+function onForegroundAppChange(procName) {
+  if (!focusFollowCfg().enabled) return;
+  const match = currentFocusMatch();
+  if (match) gotoGrid(match.id, false);
+  refreshFocusRotationPause();
+}
+function applyFocusFollowSettings() {
+  if (focusFollowCfg().enabled) desktopFocus.start(onForegroundAppChange); else desktopFocus.stop();
+  refreshFocusRotationPause();
 }
 
 // Tray icon — the app's desktop presence (the panel window deliberately skips the taskbar).
@@ -1388,7 +1421,7 @@ app.whenReady().then(async () => {
     config = newCfg;
     if (config.grids.some(g => g.id === active)) config.activeGridId = active;
     else if (!config.grids.some(g => g.id === config.activeGridId)) config.activeGridId = (config.grids[0] || {}).id || null;
-    saveConfig(); pushToPanel(); applyKnobSettings(); refreshTray(); applyRotationSettings(wasRot); applyShortcuts(); applyTheme();
+    saveConfig(); pushToPanel(); applyKnobSettings(); refreshTray(); applyRotationSettings(wasRot); applyFocusFollowSettings(); applyShortcuts(); applyTheme();
     configureHaSchedule();                                          // pick up any haAuth edits without a restart
   });
   ipcMain.handle('pickProgram', async (e) => {
@@ -1457,9 +1490,11 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('saveLightingToDevice', (e) => { if (!isFrom(e, configWin)) return false; try { return dev.saveLighting(); } catch (er) { return false; } });
+  ipcMain.handle('listRunningApps', async (e) => isFrom(e, configWin) ? await desktopFocus.listRunningApps() : []);
 
   placePanel();
   if (rotationCfg().enabled) setRotation(true);          // auto-start cycling on launch when enabled
+  applyFocusFollowSettings();                             // auto-start foreground-app polling on launch when enabled
   applyShortcuts();                                       // register per-page global hotkeys
   applyTheme();                                           // set OS theme source (drives dashboards) + paint panel + knob accent
   nativeTheme.on('updated', () => { if (themeGlobal().appearance === 'system') applyTheme(); });   // follow the OS light/dark in System mode
