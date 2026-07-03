@@ -386,8 +386,67 @@
       <div class="row" style="margin-top:8px"><label style="width:auto">Knob</label>
         <label class="iconopt" style="width:auto"><input type="checkbox" id="gKnobOn" ${g.knobOverride ? 'checked' : ''}> Override</label></div>
       ${g.knobOverride ? `<div class="row"><label style="width:auto">Turn / Click / Dbl</label>${knobSelHtml('gKnobTurn', KNOB_TURN_OPTS, (g.knob && g.knob.turn) || 'pages')} ${knobSelHtml('gKnobClick', KNOB_CLICK_OPTS, (g.knob && g.knob.click) || 'rotation')} ${knobSelHtml('gKnobDblclick', KNOB_DBLCLICK_OPTS, (g.knob && g.knob.dblclick) || 'selector')}</div>` : ''}
+      ${focusRowHtml(g)}
       ${advCloneHtml(g)}
     </details>`;
+  }
+  // ---- per-page Advanced: Desktop focus trigger app(s) ----
+  function focusChipsHtml(g) {
+    const apps = Array.isArray(g.focusApps) ? g.focusApps : [];
+    if (!apps.length) return `<span class="hint" style="margin:0">No apps mapped — this page won't auto-select.</span>`;
+    return apps.map((a, i) => `<span class="chip">${esc(a)}<button type="button" data-rm="${i}" title="Remove">✕</button></span>`).join('');
+  }
+  function focusRowHtml(g) {
+    return `<div class="row" style="margin-top:10px; align-items:flex-start"><label style="width:auto">Focus trigger app(s)</label>
+        <div style="flex:1; min-width:0">
+          <div id="gFocusChips" class="chips">${focusChipsHtml(g)}</div>
+          <div class="row" style="margin:6px 0 0">
+            <input id="gFocusInput" placeholder="process name, e.g. spotify" style="flex:1">
+            <button id="gFocusAdd" type="button">Add</button>
+          </div>
+          <select id="gFocusPicker" style="margin-top:6px"><option value="">Browse running apps…</option></select>
+        </div></div>
+      <p class="hint">When <b>Desktop focus</b> is on (Settings → Software), the panel switches to this page whenever one of these apps becomes the focused window on the PC. Matched by process name, not window title.</p>`;
+  }
+  function wireFocusRow(g) {
+    const chips = document.getElementById('gFocusChips');
+    if (!chips) return;
+    const redraw = () => { chips.innerHTML = focusChipsHtml(g); };
+    chips.addEventListener('click', e => {
+      const btn = e.target.closest('button[data-rm]');
+      if (!btn || !Array.isArray(g.focusApps)) return;
+      g.focusApps.splice(parseInt(btn.getAttribute('data-rm'), 10), 1);
+      markDirty(); redraw();
+    });
+    const addApp = name => {
+      const v = String(name || '').trim().replace(/\.exe$/i, '');
+      if (!v) return;
+      if (!Array.isArray(g.focusApps)) g.focusApps = [];
+      if (g.focusApps.some(a => a.toLowerCase() === v.toLowerCase())) return;
+      g.focusApps.push(v);
+      markDirty(); redraw();
+    };
+    const input = document.getElementById('gFocusInput'), add = document.getElementById('gFocusAdd');
+    if (input && add) {
+      add.onclick = () => { addApp(input.value); input.value = ''; input.focus(); };
+      input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); add.onclick(); } };
+    }
+    const picker = document.getElementById('gFocusPicker');
+    if (picker) {
+      picker.onmousedown = () => {
+        if (picker.dataset.loaded) return;
+        picker.dataset.loaded = '1';
+        window.openQuakeConfig.listRunningApps().then(apps => {
+          for (const a of (apps || [])) {
+            const opt = document.createElement('option');
+            opt.value = a.processName;
+            opt.textContent = a.title ? `${a.processName} — ${a.title}` : a.processName;
+            picker.appendChild(opt);
+          }
+        });
+      };
+      picker.onchange = () => { if (picker.value) addApp(picker.value); picker.value = ''; };
+    }
   }
   // Clone-grid control: on an app page that has an embedded grid, copy another page's grid tiles in.
   function advCloneHtml(g) {
@@ -458,6 +517,7 @@
         ti = -1; selEnd = -1; render(); markDirty();
       };
     }
+    wireFocusRow(g);
   }
 
   // ---- save model (no live edit) ----
@@ -1486,6 +1546,8 @@
     const s = appSettings();
     const currentRot = () => { const r = Object.assign({ enabled: false, interval: 30 }, (config.settings || {}).rotation || {}); r.cats = Object.assign({ grids: false, dashboards: false, apps: false }, ((config.settings || {}).rotation || {}).cats || {}); return r; };
     const rot = currentRot();
+    const currentFocusFollow = () => Object.assign({ enabled: false, pauseRotation: false }, (config.settings || {}).focusFollow || {});
+    const focusFollow = currentFocusFollow();
     const currentMon = () => Object.assign({ knobTurn: 'scroll', knobTap: 'enter' }, (config.settings || {}).monitor || {});
     const mon = currentMon();
     const currentTheme = () => Object.assign({ appearance: 'system', accent: '#7CFFB2', presets: ['#7CFFB2', '#38B6FF', '#FF4040', '#FFB000'] }, (config.settings || {}).theme || {});
@@ -1516,7 +1578,14 @@
         <label class="iconopt" style="width:auto"><input type="checkbox" id="sRotG"> Grids</label>
         <label class="iconopt" style="width:auto"><input type="checkbox" id="sRotD"> Dashboards</label>
         <label class="iconopt" style="width:auto"><input type="checkbox" id="sRotA"> Apps</label></div>
-      <p class="hint">A page rotates only if its category is ticked here <i>and</i> that page's own “Include in rotation” box is checked — the box appears on each page once its category is enabled. Start/stop any time from the knob menu (double-click) or the tray.</p>`;
+      <p class="hint">A page rotates only if its category is ticked here <i>and</i> that page's own “Include in rotation” box is checked — the box appears on each page once its category is enabled. Start/stop any time from the knob menu (double-click) or the tray.</p>
+
+      <p class="sectitle" style="margin-top:22px">Desktop focus</p>
+      <div class="row"><label>Auto-follow</label>
+        <input type="checkbox" id="sFocus" style="width:auto;flex:none"><span class="hint" style="margin:0 0 0 8px">switch the panel to a page when its mapped app becomes focused on the PC</span></div>
+      <div class="row"><label>While focused</label>
+        <label class="iconopt" style="width:auto"><input type="checkbox" id="sFocusPauseRot" ${focusFollow.enabled ? '' : 'disabled'}> Pause auto-rotation</label></div>
+      <p class="hint">Map apps to a page under that page's Advanced settings → “Focus trigger app(s)”. Detection polls in the background and only switches once the newly-focused app has held focus for a couple seconds, so quick alt-tabbing won't cause flicker — and manually navigating the panel away is never overridden; it only re-triggers on the next focus change. With <b>Pause auto-rotation</b> on, rotation holds off the moment a mapped app takes focus and picks back up the moment it loses focus.</p>`;
 
     // Hardware tab — knob ring + microphone
     const hwHtml = `
@@ -1814,6 +1883,14 @@
       document.getElementById('sRotG').onchange = e => { const r = currentRot(); r.cats.grids = e.target.checked; saveRot(r); };
       document.getElementById('sRotD').onchange = e => { const r = currentRot(); r.cats.dashboards = e.target.checked; saveRot(r); };
       document.getElementById('sRotA').onchange = e => { const r = currentRot(); r.cats.apps = e.target.checked; saveRot(r); };
+      const saveFocusFollow = f => { if (!config.settings) config.settings = {}; config.settings.focusFollow = f; markDirty(); };
+      document.getElementById('sFocus').checked = !!focusFollow.enabled;
+      document.getElementById('sFocus').onchange = e => {
+        const f = currentFocusFollow(); f.enabled = e.target.checked; saveFocusFollow(f);
+        document.getElementById('sFocusPauseRot').disabled = !e.target.checked;
+      };
+      document.getElementById('sFocusPauseRot').checked = !!focusFollow.pauseRotation;
+      document.getElementById('sFocusPauseRot').onchange = e => { const f = currentFocusFollow(); f.pauseRotation = e.target.checked; saveFocusFollow(f); };
     } else if (tab === 'hardware') {
       // Lighting writes go straight to the device (and persist in config) via the main process — no Save needed.
       const live = patch => { Object.assign(L, patch); if (!config.settings) config.settings = {}; config.settings.lighting = Object.assign({}, L); configApi.setLighting(patch); markDirty(); };

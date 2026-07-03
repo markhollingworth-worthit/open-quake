@@ -1,93 +1,85 @@
-# PROJECT — Meeting panel (Zoom + Teams call control)
+# PROJECT — Desktop focus (panel auto-follows the foreground PC app)
 
-Let the user trigger real call actions (mute/unmute, volume, and whatever else is
-genuinely available) on an active Zoom or Microsoft Teams call from the open-quake
-panel/knob, without alt-tabbing to the call window.
+When a configured desktop application becomes the foreground/focused window on the
+PC, the panel automatically switches to the page mapped to that app — no manual
+navigation needed. Focus Spotify → panel jumps to Music. Focus Teams → panel jumps
+to Meeting. Focus something unmapped → panel stays where it is.
 
 ## Charter
 
 **1. What is the one thing this must do?**
-Real call control from the panel — for Zoom specifically, this must work **even when
-Zoom isn't the focused window**, since that's the whole point of building Zoom first
-(Zoom has a genuine OS-level global-shortcut feature; Teams no longer does, as of the
-local API's retirement on 2026-06-30).
+Track which application has OS-level foreground focus on the PC, and when it
+changes to an app the user has mapped to a panel page, switch the panel to that
+page automatically.
 
 **2. What would be wrong if we shipped "working" software without it?**
-- Offering the same uniform button set for both platforms when their real capability
-  differs. Teams' remaining mechanism (keyboard shortcuts) only works while Teams is
-  the focused/visible window; the UI must not imply parity it doesn't have.
-- Silent failure — if a press does nothing (e.g. Teams wasn't focused), that must be a
-  documented, known limitation, not a mystery.
-- Zoom support that requires Zoom to be focused would defeat the reason we're building
-  Zoom first at all.
+- **Must not fight manual navigation.** If the user deliberately navigates the
+  panel away (knob turn, page-menu double-tap) while the mapped app is *still*
+  focused, the feature must not immediately snap back — that would make the panel
+  feel broken/uncontrollable. It should only re-trigger on the next genuine focus
+  *change* to a mapped app, not re-assert an already-satisfied match.
+- **Must not fight itself on rapid alt-tabbing.** Switching panel pages on every
+  transient focus flicker (e.g. holding Alt+Tab through several windows) would be
+  visually chaotic. Needs debounce.
+- **Must be fully optional per-page and globally.** A page with no mapped app(s)
+  is never auto-selected; the whole feature must have a global off switch.
 
 **3. What is explicitly off-limits as a workaround?**
-- No clicking hardcoded screen coordinates to hit an "Answer" toast — breaks on any UI
-  change, DPI scaling, or window position.
-- No asserting a keybind/feature exists without checking the platform's current,
-  official shortcut list first (already done for both — see below).
-- No forcibly stealing OS focus without the user explicitly choosing that trade-off
-  (open question #2 below).
+- No requiring cooperation/plugins from the target desktop apps (no "Spotify must
+  install X") — this is OS-level foreground-window tracking only, same spirit as
+  the existing SMTC now-playing read and the Teams force-focus mechanism already
+  in this codebase.
+- No polling so aggressively it becomes a noticeable CPU/battery cost — match the
+  cadence of existing pollers in this app (SMTC now-playing polls every 2.5s;
+  auto-rotation's own interval is user-configurable).
 
 **4. Deployment target and backup location?**
 - Target: bundled into **open-quake** (Windows desktop, Electron).
-- Backup: the git repo (`touch-display-setup`'s successor, `meetings` branch) —
-  commits are the backup per the git-repo exception.
+- Backup: the git repo, `desktop-focus` branch — commits are the backup.
 
 **5. How will we verify it's done?**
-- A live Zoom call: mute/unmute (and whatever else we wire) actually toggles in Zoom
-  while some other window is focused.
-- A live Teams call: mute/unmute toggles when Teams is focused/visible; documented
-  that it may not fire otherwise (per the design decision on option #2 below).
-- Editor lets the user add these actions, showing only what's genuinely wired per
-  platform — no fake parity between Zoom and Teams button lists.
+- Map Spotify → Music page, Teams → Meeting page. Focus Spotify on the PC (any
+  window of it) → panel switches to Music within the poll interval. Focus Teams →
+  panel switches to Meeting. Focus an unmapped app (e.g. a text editor) → panel
+  stays on whatever page it was last on.
+- While Spotify is focused and Music is showing, manually navigate the panel to a
+  different page — it stays there (doesn't snap back) until focus changes to
+  something else and back to Spotify again.
+- Global toggle off → no auto-switching occurs regardless of focus changes.
+- Rapid alt-tabbing between two mapped apps doesn't cause visible page-switch
+  flicker faster than the debounce window.
 
-## What we already know (researched this session)
+## Decisions (signed off 2026-07-02)
 
-- **Zoom**: Settings → Keyboard Shortcuts → per-action **"Enable Global Shortcut"**
-  checkbox. First-party, documented, works system-wide once the user assigns a combo
-  *inside Zoom itself*. Confirmed for mute/unmute; full list of which other actions
-  support the global checkbox not yet confirmed.
-- **Teams**: local WebSocket API (port 8124) **retired by Microsoft 2026-06-30**.
-  Remaining: `Ctrl+Shift+M` (mute), `Ctrl+Shift+A`/`Ctrl+Shift+S` (accept video/audio),
-  `Ctrl+Shift+D` (decline), `Ctrl+Shift+H` (end call), `Ctrl+Shift+O` (camera) — all
-  require Teams to be the focused window. Windows' OS-level Global Mute (Win+Alt+K) is
-  a separate, non-Teams-specific mechanism with a flaky track record as of the most
-  recent info found (late 2024).
-- Volume is not a Teams/Zoom concept either way — it's OS-level per-app or master
-  volume, unrelated to either platform's own API/shortcuts.
-
-## Decisions (signed off 2026-07-01)
-
-1. **Dedicated "Meeting" app page** — `kind:'app'`, `app:'meeting'`, mirroring the
-   Music app's pattern, with a platform switcher (Zoom / Teams) inside it. Left to my
-   discretion; going with the dedicated page.
-2. **Teams focus handling** — force-focus Teams before sending the keystroke, using
-   the most reliable mechanism available (not the naive `SetForegroundWindow` call,
-   which Windows' foreground-lock protection frequently blocks from a background
-   process — use the `AttachThreadInput` workaround instead).
-3. **Zoom keybinds** — allow both: ship sensible default combos the user can assign
-   inside Zoom's own settings, AND let the user override with whatever combo they've
-   already configured, per action.
+1. **Detection mechanism**: polling, ~1.5s interval (matches `nowplaying.js`'s cadence).
+2. **Matching key**: process executable name (e.g. `spotify.exe`). Plus a
+   "browse running apps" picker (`Get-Process | Where-Object MainWindowTitle`,
+   same technique `meetingControl.js`'s Teams-focus script already uses to find
+   processes with a real window) so the user doesn't have to know/type exact exe
+   names — free-text entry stays available too, for mapping an app that isn't
+   currently running.
+3. **Mapping location**: new "Focus trigger app(s)" field in each page's existing
+   Advanced settings section.
+4. **Global toggle**: sibling to the existing auto-rotation on/off switch in Settings.
 
 ## Approach
 
-- **`app/meetingControl.js`** — new module. `sendMeetingAction(platform, action, deps)`:
-  - Teams: force-focus the Teams process window (PowerShell + P/Invoke
-    `AttachThreadInput`/`SetForegroundWindow`, consistent with `touchSetup.js`'s
-    existing elevated-PowerShell pattern), then send the fixed Teams shortcut via the
-    robotjs instance already used in `mediaKeys.js`.
-  - Zoom: send the user-configured (or default) keystroke directly via robotjs — no
-    focus-forcing needed, since Zoom's own "Enable Global Shortcut" makes it work
-    regardless of focus once the user has set it up inside Zoom.
-- **New built-in app page** — `app:'meeting'`, cloning the Music app's
-  ensure-page-exists-once / respect-deletion pattern in `main.js`. Page renders a
-  platform switcher + action buttons; per-platform action list reflects only what's
-  genuinely wired (no fake Zoom/Teams parity).
-- **Editor** — `renderAppOpts`-style options: platform-specific keybind fields for
-  Zoom (editable, defaults pre-filled), read-only display of the fixed Teams shortcuts
-  (not editable, since Teams' shortcuts aren't user-configurable).
-- **actionRunner.js** — no change needed; this routes through `meetingControl.js`
-  directly from the app page's button handler, not through the generic tile action
-  system (this isn't a tile action, it's the Meeting app's own button grid, like
-  Music's transport controls).
+- **`app/desktopFocus.js`** (new) — `getForegroundProcessName()` (adapt the
+  P/Invoke `GetForegroundWindow`/`GetWindowThreadProcessId` pattern already
+  proven in `meetingControl.js`, reading instead of setting), `listRunningApps()`
+  (the picker query), and a poll loop that emits only on process-name *change*
+  (not every tick) — this is what naturally satisfies "don't fight manual
+  navigation while the same app stays focused."
+- **Debounce**: require the same new foreground process to be stable across 2
+  consecutive polls (~3s) before triggering, so rapid alt-tabbing doesn't cause
+  page-switch flicker.
+- **Data model**: `g.focusApps` (array of process name strings) per page.
+  `config.settings.focusFollow = { enabled: bool }` alongside the existing
+  rotation settings shape.
+- **Editor**: `focusApps` list editor in `advRowHtml`/`wireAdvRow` (add/remove
+  chips, each addable by free-text or via the running-apps picker) + the global
+  toggle placed next to Settings' existing rotation controls.
+- **Main process**: on a genuine foreground-change event (from the poll loop),
+  if `focusFollow.enabled` and some page's `focusApps` includes the new process
+  name, `gotoGrid()` to it. No action on unmapped processes or steady-state
+  (same app still focused) polls.

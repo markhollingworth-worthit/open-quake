@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('openQuakeConfig', {
   getLighting() { return ipcRenderer.invoke('getLighting'); },
   setLighting(lighting) { ipcRenderer.send('setLighting', lighting); },
   saveLightingToDevice() { return ipcRenderer.invoke('saveLightingToDevice'); },
+  listRunningApps() { return ipcRenderer.invoke('listRunningApps'); },
   // Global Home Assistant cache: registries + dashboards in main's memory; per-entity states lazy.
   getHaCache() { return ipcRenderer.invoke('getHaCache'); },
   refreshHaCache() { return ipcRenderer.invoke('refreshHaCache'); },
