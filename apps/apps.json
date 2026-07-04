@@ -147,6 +147,27 @@
         "type": "text",
         "default": "lovelace",
         "help": "url_path of an HA Lovelace dashboard (e.g. 'lovelace' for Overview). Use the picker above to pick one from your HA server."
+      },
+      {
+        "key": "kiosk",
+        "label": "Kiosk mode",
+        "type": "bool",
+        "default": false,
+        "help": "Hides both the header and sidebar. Requires the kiosk-mode integration installed on your Home Assistant instance — this only sets the URL flag it reads."
+      },
+      {
+        "key": "hideHeader",
+        "label": "Hide header",
+        "type": "bool",
+        "default": false,
+        "help": "Hides just HA's top header bar. Also requires the kiosk-mode integration on your HA instance."
+      },
+      {
+        "key": "hideSidebar",
+        "label": "Hide sidebar",
+        "type": "bool",
+        "default": false,
+        "help": "Hides just HA's sidebar. Also requires the kiosk-mode integration on your HA instance."
       }
     ]
   },

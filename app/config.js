@@ -1287,13 +1287,18 @@
         <div><label class="iconopt" style="width:auto"><input type="checkbox" id="gGrid" ${g.gridOn ? 'checked' : ''}> Buttons (grid)</label></div>
         <p class="hint" style="margin:6px 0 0">Only two may be checked at once (screen space). Grid size/tiles are on the <b>Buttons</b> tab.</p>
       </fieldset>`;
-    // HA Dashboard: dashboard picker (fetched from HA on render), then the standard Buttons toggle.
+    // HA Dashboard: dashboard picker (fetched from HA on render), kiosk-mode flags, then the standard Buttons toggle.
     const curDash = (g.options && g.options.dashboard) || 'lovelace';
     const haBox = `<div id="haDashBox" style="margin-top:10px">
         <div class="row"><label>Dashboard</label>
           <select id="haDashSel" style="flex:1"><option value="${esc(curDash)}" selected>${esc(curDash)} (current)</option></select>
           <button id="haDashRefresh" type="button" title="Reload from HA">Refresh</button></div>
         <p class="hint" id="haDashMsg" style="margin:4px 0 0">Loading dashboards…</p>
+        <div class="row" style="margin-top:10px"><label style="width:auto">URL flags</label>
+          <label class="iconopt" style="width:auto"><input type="checkbox" id="haKiosk" ${optVal(g, 'kiosk', false) ? 'checked' : ''}> Kiosk mode</label>
+          <label class="iconopt" style="width:auto"><input type="checkbox" id="haHideHeader" ${optVal(g, 'hideHeader', false) ? 'checked' : ''}> Hide header</label>
+          <label class="iconopt" style="width:auto"><input type="checkbox" id="haHideSidebar" ${optVal(g, 'hideSidebar', false) ? 'checked' : ''}> Hide sidebar</label></div>
+        <p class="hint">Requires the <b>kiosk-mode</b> integration installed on your Home Assistant instance — these only set the URL flags it reads. Kiosk mode hides both header and sidebar; the other two hide just one.</p>
       </div>` + (canGrid ? `<div class="row" style="margin-top:10px"><label style="width:auto">Buttons</label>
         <label class="iconopt" style="width:auto; white-space:nowrap"><input type="checkbox" id="gGrid" ${g.gridOn ? 'checked' : ''}> Add a button grid beside the app</label></div>
       <p class="hint">Adds a strip of launcher tiles beside the app — pick the side, size, and tiles on the <b>Buttons</b> tab that appears.</p>` : '');
@@ -1352,6 +1357,9 @@
       sel.onchange = e => { if (!g.options) g.options = {}; g.options.dashboard = e.target.value; markDirty(); };
       ref.onclick = refresh;
       configApi.getHaCache().then(fillFromCache);   // show whatever's currently cached
+      const kiosk = document.getElementById('haKiosk'); if (kiosk) kiosk.onchange = e => { if (!g.options) g.options = {}; g.options.kiosk = e.target.checked; markDirty(); };
+      const hideHeader = document.getElementById('haHideHeader'); if (hideHeader) hideHeader.onchange = e => { if (!g.options) g.options = {}; g.options.hideHeader = e.target.checked; markDirty(); };
+      const hideSidebar = document.getElementById('haHideSidebar'); if (hideSidebar) hideSidebar.onchange = e => { if (!g.options) g.options = {}; g.options.hideSidebar = e.target.checked; markDirty(); };
     } else {
       renderAppOpts(g, def);
     }

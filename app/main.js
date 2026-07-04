@@ -382,10 +382,18 @@ function deleteDropInApp(id) {
   catch (e) { return { ok: false, error: String(e && e.message || e) }; }
 }
 // Secret-at-rest store: encrypts the secret-typed config fields (dashboard tokens / Basic passwords /
-// custom header values / app secret options) in config.json via Electron safeStorage. The in-memory
-// `config` stays plaintext; encryption happens only at the disk boundary (saveConfig). safeStorage
-// needs app-ready, so decryptConfig runs as the first thing in whenReady, not at module load.
-const secretStore = createSecretStore({ safeStorage, loadApps, log: m => console.log(m) });
+// custom header values / app secret options) in config.json. On Windows the backend is raw DPAPI
+// (app/dpapi.js) — Electron safeStorage's Chromium key layer lost its key across launches here,
+// orphaning stored secrets (2026-07-03); safeStorage remains the backend elsewhere and the decrypt
+// path for legacy v1 values. The in-memory `config` stays plaintext; encryption happens only at the
+// disk boundary (saveConfig). safeStorage needs app-ready, so decryptConfig runs as the first thing
+// in whenReady, not at module load.
+const secretStore = createSecretStore({
+  safeStorage,
+  dpapi: process.platform === 'win32' ? require('./dpapi') : null,
+  loadApps,
+  log: m => console.log(m),
+});
 
 // Build the file: URL for an app page, encoding its options as a #hash (file:// drops a ?query).
 function appOptionQuery(def, opts, include) {
@@ -799,7 +807,12 @@ async function resolveGridIcons(grid) {
       const ha = (config.settings || {}).haAuth || {};
       const baseUrl = String(ha.url || '').replace(/\/+$/, '');
       const dash = String((grid.options || {}).dashboard || 'lovelace').replace(/^\/+/, '');
-      const synthetic = { ...grid, kind: 'web', url: baseUrl ? baseUrl + '/' + dash : '', auth: { type: 'ha', token: ha.token || '' }, themed: false };
+      const opts = grid.options || {};
+      const kioskFlags = ['kiosk', 'hideHeader', 'hideSidebar']
+        .filter(k => opts[k])
+        .map(k => k === 'hideHeader' ? 'hide_header' : k === 'hideSidebar' ? 'hide_sidebar' : k);
+      const kioskQuery = kioskFlags.length ? '?' + kioskFlags.join('&') : '';
+      const synthetic = { ...grid, kind: 'web', url: baseUrl ? baseUrl + '/' + dash + kioskQuery : '', auth: { type: 'ha', token: ha.token || '' }, themed: false };
       out = grid.gridOn ? { ...synthetic, tiles: await resolveTiles(tilesIn) } : synthetic;
     } else {
       const base = { ...grid, kind: 'web', url: appPageUrl(grid), themed: true };
@@ -1319,14 +1332,15 @@ async function fetchHaEntityState(entityId) {
 
 app.whenReady().then(async () => {
   // safeStorage requires app-ready, so secrets loaded at module init are still encrypted strings in
-  // `config` here — decrypt them in memory before anything reads a secret VALUE. If the on-disk config
-  // still has plaintext secrets and encryption is now available, migrate it to encrypted-at-rest.
-  const needsMigration = secretStore.hasPlaintextSecret(config);
+  // `config` here — decrypt them in memory before anything reads a secret VALUE. If the on-disk form
+  // is stale (plaintext secrets, or legacy v1 values the DPAPI backend should re-wrap as v2) and
+  // encryption is available, rewrite it once.
+  const needsMigration = secretStore.needsRewrite(config);
   config = secretStore.decryptConfig(config);
   if (secretStore.available()) {
-    if (needsMigration) saveConfig();                        // migrate plaintext config to encrypted-at-rest
+    if (needsMigration) saveConfig();                        // migrate plaintext/legacy config to current at-rest form
   } else if (needsMigration) {
-    console.log('safeStorage unavailable — config secrets kept in plaintext on disk (fallback)');
+    console.log('secret encryption unavailable — config secrets kept in plaintext on disk (fallback)');
   }
   try { powerSaveBlocker.start('prevent-display-sleep'); } catch (e) {}
   createTray();
