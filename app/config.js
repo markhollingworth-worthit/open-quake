@@ -1232,9 +1232,9 @@
     const el = document.getElementById('authFields'), hint = document.getElementById('authHint');
     const t = g.auth.type;
     if (t === 'ha') {
-      el.innerHTML = `<div class="row"><label>Token</label>${secretInput(g.auth.token, 'id="aTok" placeholder="long-lived access token"')}</div>`;
+      el.innerHTML = `<div class="row"><label>Token</label>${secretInput(g.auth.token, 'id="aTok" placeholder="blank = use the global HA token (Settings → Auth)"')}</div>`;
       document.getElementById('aTok').oninput = e => { g.auth.token = e.target.value; markDirty(); };
-      hint.innerHTML = '<b>Home Assistant</b> (no keyboard on the panel): profile → Security → Long-Lived Access Tokens → Create, paste above. The panel signs in automatically.';
+      hint.innerHTML = 'Leave blank to use the <b>global Home Assistant token</b> you already set in Settings → Auth — the panel signs in automatically. Only fill this in if this specific dashboard needs a <i>different</i> HA token (e.g. a second HA instance): profile → Security → Long-Lived Access Tokens → Create, paste above.';
     } else if (t === 'basic') {
       el.innerHTML = `<div class="row"><label>User</label><input id="aUser" value="${esc(g.auth.user)}"></div>
         <div class="row"><label>Password</label>${secretInput(g.auth.pass, 'id="aPass"')}</div>`;

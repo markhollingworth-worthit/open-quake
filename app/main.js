@@ -819,7 +819,13 @@ async function resolveGridIcons(grid) {
       out = grid.gridOn ? { ...base, tiles: await resolveTiles(tilesIn) } : base;                     // file/app pages with the native button strip -> resolve its tile icons
     }
   } else if (grid.kind === 'web') {
-    out = grid.gridOn ? { ...grid, tiles: await resolveTiles(tilesIn) } : grid;                       // dashboard: resolve the button-grid tile icons, else nothing to resolve
+    // A dashboard's own HA-token field is an OPTIONAL override (e.g. a second HA instance) — left
+    // blank, it falls back to the global token from Settings -> Auth, same source the Home
+    // Assistant Dashboard app uses, so a plain "Home Assistant token" dashboard just works.
+    const g2 = (grid.auth && grid.auth.type === 'ha' && !grid.auth.token)
+      ? { ...grid, auth: { ...grid.auth, token: ((config.settings || {}).haAuth || {}).token || '' } }
+      : grid;
+    out = g2.gridOn ? { ...g2, tiles: await resolveTiles(tilesIn) } : g2;                             // dashboard: resolve the button-grid tile icons, else nothing to resolve
   } else {
     out = { ...grid, tiles: await resolveTiles(tilesIn) };
   }
