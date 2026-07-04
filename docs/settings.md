@@ -72,8 +72,10 @@ single server. Today that's just Home Assistant.
   exposes the **Home Assistant Dashboard** app and **HA entity** tile type.
 - **URL** — your HA base URL (e.g. `https://ha.example.com` or `http://homeassistant.local:8123`).
 - **Long-Lived Access Token** — create one in HA (profile → Security → bottom of the
-  page). Stored **encrypted at rest** via Electron `safeStorage`, the same secret
-  store per-dashboard HA tokens use.
+  page). Stored **encrypted at rest** — on Windows via per-value DPAPI (tied to your
+  Windows login, no key file to lose across restarts), the same secret store
+  per-dashboard HA tokens and app secret options use. macOS uses Keychain-backed
+  Electron `safeStorage` instead.
 - **Refresh Configuration** — pulls a fresh copy of the registries from HA. If you
   toggle Use HA or change credentials, click Refresh — it auto-saves first so the
   refresh sees your edits.

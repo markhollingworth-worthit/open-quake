@@ -10,6 +10,7 @@ Detailed guides for open-quake. Back to the [project README](../README.md).
 - **[Apps & drop-ins](apps.md)** — bundled apps, writing your own, and the drop-in app manager
 - **[Community apps](community-apps.md)** — install or submit shared drop-in apps
 - **[Music controller](music.md)** — now-playing, transport, album art, lyrics, button strip
+- **[Meeting](meeting.md)** — one-tap mute/video/accept/decline/leave for Zoom and Teams
 - **[System monitor](system-monitor.md)** — live CPU/GPU/RAM/disk/network/battery
 - **[Open WebUI chat + voice](ai-chat.md)** — chat to your LLM, hold the knob to talk
 - **[Settings & knob](settings.md)** — launch mode, rotation, RGB ring, knob behavior, mic

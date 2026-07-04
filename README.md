@@ -26,16 +26,18 @@ It gives you:
   with per-page auth (HA token, Basic, custom headers). → [Dashboards](docs/dashboards.md)
 - **Home Assistant integration** — set your HA URL + long-lived token once in
   **Settings → Auth**, and three things light up: a **Home Assistant Dashboard** app
-  (pick from your real dashboards in a dropdown), **HA entity tiles** (tap a tile to call
-  a service on a light / switch / media player / scene / automation / …, filtered by
-  device type, room, label, or favorites), and **real MDI icons** rendered live from
-  jsDelivr so tiles look like HA does. → [Home Assistant](docs/home-assistant.md)
+  (pick from your real dashboards in a dropdown, with optional kiosk-mode flags to hide
+  HA's header/sidebar), **HA entity tiles** (tap a tile to call a service on a light /
+  switch / media player / scene / automation / …, filtered by device type, room, label,
+  or favorites), and **real MDI icons** rendered live from jsDelivr so tiles look like HA
+  does. → [Home Assistant](docs/home-assistant.md)
 - **Knob control** — rotate for volume (or dashboard scroll), single-click to mute,
   **double-click for the page selector**, and **hold to talk** (voice input). The
   knob's **RGB ring** is configurable. → [Settings](docs/settings.md)
 - **Bundled apps** — a Flip Clock, a **World Clock** (US time zones or a pick of world
   cities, digital or analog), a **[Music controller](docs/music.md)** (now-playing +
-  transport + app grid), a **[System Monitor](docs/system-monitor.md)** (live
+  transport + app grid), a **[Meeting](docs/meeting.md)** app (one-tap mute/video/accept
+  /decline/leave for Zoom and Teams), a **[System Monitor](docs/system-monitor.md)** (live
   CPU/GPU/RAM/disk/network/battery), and an **[Open WebUI chat](docs/ai-chat.md)** you can
   **talk to by holding the knob**. → [Apps](docs/apps.md)
 - **Theming** — a global **light / dark / system** mode and an **accent color** (with savable
@@ -48,9 +50,9 @@ It gives you:
   the mic, and tune the knob ring; plus a system-tray menu of quick toggles. → [Settings](docs/settings.md)
 
 > **Status:** early but capable. Touch, knob (incl. RGB ring + hold-to-talk), grids, merged
-> buttons, web dashboards, the bundled apps (clock / world clock / music / system monitor / AI chat),
-> light/dark + accent theming, the on-board mic, and the editor are working and validated against
-> real hardware. The panel is
+> buttons, web dashboards, the bundled apps (clock / world clock / music / meeting / system
+> monitor / AI chat), light/dark + accent theming, the on-board mic, and the editor are
+> working and validated against real hardware. The panel is
 > driven as a normal external monitor (Windows sees a 480×1920 / 1920×480 display); pushing
 > frames over the HID resource channel is not implemented.
 
@@ -66,7 +68,9 @@ Detailed guides live in **[docs/](docs/README.md)**:
 
 **[Bedrock open desk console](https://github.com/TeeJS/bedrock-console)** — an open-source
 hardware project to build your own 1920×480 touchscreen + knob console for use with open-quake.
-Generic parts, 3D-printable enclosure, RP2040 firmware for the knob. Early WIP.
+Generic parts, 3D-printable enclosure, RP2040 firmware for the knob. Firmware is built,
+flashed, and verified against real hardware; enclosure parts are printable. Still early —
+full assembly/wiring docs are in progress.
 
 ## Download
 

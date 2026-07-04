@@ -81,5 +81,6 @@ loopback origin). The bundled widget is the
   aren't set.
 - **Voice does nothing on hold** — make sure you're on the chat page; the device mic is on; and
   OWUI's STT is set to local Whisper.
-- **Security note** — the API key is stored in plain text in `%APPDATA%\open-quake\config.json`.
-  Fine for a local, trusted panel; don't ship that config off the device.
+- **Security note** — the API key is encrypted at rest in `%APPDATA%\open-quake\config.json`
+  (DPAPI on Windows, Keychain-backed on macOS), same as the Home Assistant token. It's still
+  local to this device and this Windows login — don't ship that config off the device.

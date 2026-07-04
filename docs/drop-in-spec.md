@@ -64,6 +64,9 @@ Design invariants a conforming host MUST preserve:
 }
 ```
 
+(This example is illustrative, composing every field in one manifest — no single real app
+uses all of them at once. See `apps/apps.json` or any `community-apps/` folder for real ones.)
+
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `id` | string | **yes** | Stable identifier. MUST match `^[a-z0-9][a-z0-9_-]*$`. Folder name SHOULD equal it. |
@@ -73,7 +76,9 @@ Design invariants a conforming host MUST preserve:
 | `options` | array | no | User-set option descriptors (§2.5). Default `[]`. |
 | `server` | string | served only | Relative path to a host-side Node module (§5.1). Triggers the exec-code warning on import. |
 | `proxy` | object | served only | Outbound-fetch allow-list for the app's page (§5.2). |
-| `grid` | object | served only | OPTIONAL embedded editable tile grid carried by the app. MAY be ignored by a host that doesn't support in-app grids. |
+| `grid` | object | served only | OPTIONAL embedded editable tile grid carried by the app: `{ cols, rows, defaults }` (column/row count + default tile contents). MAY be ignored by a host that doesn't support in-app grids. |
+| `hideGridInEditor` | bool | no | When `true`, the editor hides this app's embedded-grid controls (the app manages its own layout). Default `false`. |
+| `dev` | bool | no | Marks the app as developer-only; a conforming host MAY hide it from the normal app picker behind a "show developer apps" toggle. Purely a discoverability hint — carries no security meaning. |
 
 A host MUST ignore unknown manifest keys (forward compatibility).
 
@@ -103,8 +108,11 @@ Each entry of `options` describes one user-configurable value the editor renders
 | --- | --- |
 | `key` | Option name; becomes the URL param / hash key and the `options` map key. |
 | `label` | Editor label. |
-| `type` | `text` \| `bool` \| `secret` \| (host-defined extras). `bool` is coerced to a real boolean. |
+| `type` | `text` \| `bool` \| `secret` \| `select` \| (host-defined extras). `bool` is coerced to a real boolean. |
 | `default` | Default value when unset. |
+| `choices` | **Required for `type: "select"`.** Array of `[value, label]` pairs the editor renders as a dropdown. |
+| `help` | Optional help text shown under the field in the editor. |
+| `showIf` | Optional conditional visibility: `{ key, value }` — this field only renders when the option named `key` currently equals `value`. Lets an option's own fields hide/show based on a sibling (e.g. a set of manual fields that only appear when a "use defaults" toggle is off). |
 | `serverOnly` | If `true`, the value is **never** placed in the page URL — it reaches the app only via the host-side server adapter / `/app-config` (§5.3). |
 
 `type: "secret"` values MUST be stored encrypted at rest and MUST NOT appear in the page URL;

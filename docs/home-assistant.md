@@ -19,7 +19,10 @@ Open **Settings → Auth** and:
 
 The status line shows what loaded — e.g. *"12 dashboards, 487 entities, 24 areas, 38 devices, 5 floors, 9 labels (3 s ago)"*. Click Refresh any time after changes to your HA setup (added an area, renamed an entity, etc.) to re-pull.
 
-The token is encrypted at rest via Electron `safeStorage` (same place per-dashboard HA tokens live). It never leaves the main process except for requests to your HA URL.
+The token is encrypted at rest — on Windows via per-value DPAPI, no key file to lose
+across restarts; macOS uses Keychain-backed Electron `safeStorage` (same place
+per-dashboard HA tokens live either way). It never leaves the main process except for
+requests to your HA URL.
 
 ## What gets cached
 
@@ -45,6 +48,14 @@ Add a page → **+ App** → pick **Home Assistant Dashboard**. The Dashboard dr
 At runtime, open-quake translates the app to a synthetic web-dashboard page pointed at `<haUrl>/<dashboard_path>` with the HA token injected into `localStorage` (same trick the existing `auth: ha` web grid uses). Login persists across reloads. The page renders inside the panel webview just like any other dashboard — knob scrolls, tap clicks, HA's own tab bar at the top of the dashboard lets you switch between views.
 
 Picking a different view (e.g. `/lovelace-second/2`) isn't supported yet; you land on the dashboard's first view and tap HA's tabs to move.
+
+Three checkboxes on the app's options — **Kiosk mode**, **Hide header**, **Hide sidebar** —
+append the matching URL flags (`?kiosk`, `hide_header`, `hide_sidebar`) that HA's
+[kiosk-mode](https://github.com/NemesisRE/kiosk-mode) integration reads. **Kiosk mode**
+hides both header and sidebar in one flag; the other two are for hiding just one. This
+requires the kiosk-mode integration installed on your Home Assistant instance — the
+checkboxes only set the URL flags it looks for, they don't install or configure anything
+HA-side.
 
 ## HA entity tiles
 

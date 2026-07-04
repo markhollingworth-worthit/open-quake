@@ -2,6 +2,14 @@
 
 ## How the hardware works
 
+open-quake drives two different knob devices through the same code path, routed by
+`app/multiKnob.js`: whichever one is actually plugged in wins, checked in this order —
+**Bedrock** (`app/BedrockConnector.js`, the open RP2040 knob — see the companion
+[bedrock-console](https://github.com/TeeJS/bedrock-console) project) first, falling back
+to **ARIS-68** (`src/Aris68Connector.js`, reverse-engineered) if no Bedrock device is
+found. Both connectors emit the same internal knob-event shape, so the rest of the app
+(panel, rotation, desktop focus, etc.) doesn't know or care which one is attached.
+
 The DK-QUAKE's screen is a standard external monitor (HDMI or USB-C DisplayPort
 alt-mode) recognized by Windows as a 480×1920 portrait display. A separate USB
 link handles touch and control/knob/mic interfaces. Video travels over the
@@ -15,7 +23,9 @@ idle-blanks; the driver wakes it and sends a periodic keep-alive so it stays on.
 The on-board mic enumerates as a standard **"5- USB PnP Audio Device"** — any app
 can read it directly; `open-quake` doesn't wrap it.
 
-Full reverse-engineered protocol: [DEVICE_PROTOCOL.md](DEVICE_PROTOCOL.md).
+Full reverse-engineered ARIS-68 protocol: [DEVICE_PROTOCOL.md](DEVICE_PROTOCOL.md).
+The Bedrock knob's own (non-reverse-engineered, open) HID protocol is documented in
+the bedrock-console repo's `firmware/PROTOCOL.md`.
 
 ## Build & run (Windows)
 
@@ -40,6 +50,12 @@ npm start
 
 > If `npm install` fails with `EBUSY … electron.exe`, a copy of the app is still
 > running — close it first, then retry.
+
+`npm start` / `npm run dist` also run `node build-smtc.js` first, which compiles two more
+native helpers (`native/smtc-art.cs` → album-art reader, `native/smtc-control.cs` → SMTC
+transport control) with the .NET Framework `csc.exe` — needs the Windows 10/11 SDK.
+It's idempotent (skips already-current builds) and best-effort: a missing/failed build
+just means no cover art at runtime, it won't block `npm start`.
 
 Building the natives on modern Windows needs Visual Studio 2022 Build Tools
 (Desktop C++ workload) and a Python with `distutils` (`pip install
@@ -86,6 +102,10 @@ docs/DEVICE_PROTOCOL.md   reverse-engineered protocol spec           [PolyForm N
 tools/                    standalone HID probe / write-test scripts  [PolyForm NC]
 app/                      the Electron launcher + PC grid editor     [MIT]
   main.js                 host: windows, IPC, launch/volume/config
+  multiKnob.js            picks Bedrock or ARIS-68, whichever is plugged in
+  BedrockConnector.js     the open RP2040 knob's HID driver (mirrors Aris68Connector's shape)
+  secretStore.js          encrypts secret-typed config fields at rest (dispatches to backend)
+  dpapi.js                Windows secret backend: raw DPAPI, no key file (see Settings & Auth docs)
   index.html              the on-panel UI (grids + web dashboards)
   config.html             the PC editor (pages, tiles, icons)
   config.default.json     seed config (copied to config.json on first run)
@@ -99,3 +119,7 @@ app/                      the Electron launcher + PC grid editor     [MIT]
   owui-widget.css         widget styles                    [vendored, MIT]
 apps/                     bundled local web apps + apps.json manifest [MIT]
 ```
+
+Secrets (dashboard/HA tokens, app secret options) are encrypted at rest via `secretStore.js`,
+which dispatches to a platform backend: raw Windows DPAPI (`dpapi.js`, per-value, no key file)
+on Windows, Electron `safeStorage` (Keychain-backed) elsewhere.

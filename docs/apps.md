@@ -19,6 +19,8 @@ Included apps:
   light/dark theme and accent.
 - **[Music controller](music.md)** — now-playing + transport + a programmable app grid.
 - **[Open WebUI chat + voice](ai-chat.md)** — talk to your own LLM, with knob push-to-talk.
+- **[Meeting](meeting.md)** — one-tap mute/video/accept/decline/leave for Zoom and Teams,
+  no keyboard or mouse.
 - **[Home Assistant Dashboard](home-assistant.md)** — pick a Lovelace dashboard from your
   HA server in a dropdown, no hand-typed URLs. Requires **Use Home Assistant** in
   **Settings → Auth**; hidden from the App picker otherwise. Uses your global HA token

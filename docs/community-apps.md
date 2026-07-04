@@ -21,8 +21,8 @@ they survive app updates. See [Apps & drop-ins](apps.md) for the full manager.
 
 Open a pull request that adds **both**:
 
-- `community-apps/<your-app-id>/` — your app's source folder (an `app.json` manifest plus
-  its files), so others can review the code; and
+- `community-apps/<your-app-id>/` — your app's source folder (an `app.json` or
+  `manifest.json` manifest plus its files), so others can review the code; and
 - `community-apps/<your-app-id>.zip` — the same folder zipped, ready to import.
 
 Rules:

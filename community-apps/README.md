@@ -8,10 +8,18 @@ For how to install or submit an app — and a safety note — see the docs:
 
 ## Available apps
 
+- **[jarvis](jarvis)** — JARVIS voice-assistant client: pairs with a JARVIS server over a
+  PIN, and talks to Gemini Live, Ollama, or an OpenAI-compatible endpoint. Download
+  [`jarvis.zip`](jarvis.zip) and import via **Settings → Drop-In Apps → Add**.
 - **[news-spotlight](news-spotlight)** — full-screen rotating RSS feed reader. Defaults
   to BBC / Sky / The Verge / Ars Technica; configurable feeds, story duration, Ken
   Burns motion, breaking-news mode, and an SSRF-safe proxy. Download
   [`news-spotlight.zip`](news-spotlight.zip) and import via
+  **Settings → Drop-In Apps → Add**.
+- **[spotify-volume](spotify-volume)** — per-app Windows volume control for the knob (Spotify
+  by default, configurable to any process). Uses a bundled native helper against the Core
+  Audio session APIs — no admin, no Spotify login/Premium, no Web API. By **J Last**.
+  Download [`spotify-volume.zip`](spotify-volume.zip) and import via
   **Settings → Drop-In Apps → Add**.
 
 To add one, open a pull request — see
