@@ -1,7 +1,13 @@
 'use strict';
-// Encrypt the secret-typed config fields at rest in config.json using Electron `safeStorage`
-// (macOS Keychain-backed). Secrets stay PLAINTEXT in the in-memory config — they are only
-// (de)serialized at the disk boundary. Dependency-injected so it unit-tests without Electron.
+// Encrypt the secret-typed config fields at rest in config.json. Secrets stay PLAINTEXT in the
+// in-memory config — they are only (de)serialized at the disk boundary. Dependency-injected so
+// it unit-tests without Electron.
+//
+// Backends: on Windows, raw DPAPI per-value blobs via app/dpapi.js (`oqenc:v2:`) — Electron
+// safeStorage's Chromium key layer proved to lose its key across real launches (2026-07-03),
+// orphaning every stored secret; raw DPAPI has no key file to lose. Elsewhere, Electron
+// `safeStorage` (`oqenc:v1:`, macOS Keychain-backed). v1 values still decrypt on Windows for
+// migration; anything that decrypts is re-wrapped as v2 by the next save (see needsRewrite).
 //
 // Secret fields walked by encryptConfig/decryptConfig/hasPlaintextSecret:
 //   web grids (g.kind === 'web' && g.auth):
@@ -12,11 +18,15 @@
 //   settings:
 //     settings.spotify.refreshToken                   (NOT settings.spotify.clientId — clientId is public)
 //     settings.haAuth.token                           (NOT settings.haAuth.url — the URL is not sensitive)
-const MARKER = 'oqenc:v1:';
+const MARKER = 'oqenc:v1:';    // legacy: Electron safeStorage — still decrypted, never written on Windows
+const MARKER2 = 'oqenc:v2:';   // Windows: raw DPAPI per-value blobs (app/dpapi.js), no key file
 
-function createSecretStore({ safeStorage, loadApps, log = () => {} }) {
+function createSecretStore({ safeStorage, dpapi, loadApps, log = () => {} }) {
+  const dp = dpapi || null;   // injected on win32 only; null elsewhere keeps the safeStorage path
+
   // safeStorage is only usable after the Electron app is ready; treat any throw as "unavailable".
   function available() {
+    if (dp) return dp.available();
     try { return !!(safeStorage && safeStorage.isEncryptionAvailable && safeStorage.isEncryptionAvailable()); }
     catch { return false; }
   }
@@ -25,7 +35,13 @@ function createSecretStore({ safeStorage, loadApps, log = () => {} }) {
   // no-op for non-strings / empty strings. Falls back to plaintext (caller logs) when unavailable.
   function encryptValue(plain) {
     if (typeof plain !== 'string' || plain === '') return plain;
-    if (plain.startsWith(MARKER)) return plain;              // already encrypted — don't double-wrap
+    if (plain.startsWith(MARKER) || plain.startsWith(MARKER2)) return plain;   // already encrypted — don't double-wrap
+    if (dp) {
+      const blob = dp.protectOne(plain);
+      if (blob) return MARKER2 + blob;
+      log('dpapi protect failed — storing plaintext (fallback)');
+      return plain;
+    }
     if (!available()) return plain;                          // fallback: store plaintext (logged by saveConfig path)
     return MARKER + safeStorage.encryptString(plain).toString('base64');
   }
@@ -34,7 +50,14 @@ function createSecretStore({ safeStorage, loadApps, log = () => {} }) {
   // migration path: a pre-encryption config decrypts to itself. A decrypt failure logs and preserves
   // the marked ciphertext, so a later save does not erase the user's secret.
   function decryptValue(stored) {
-    if (typeof stored !== 'string' || !stored.startsWith(MARKER)) return stored;
+    if (typeof stored !== 'string') return stored;
+    if (stored.startsWith(MARKER2)) {
+      if (!dp) return stored;                                // v2 blob on a non-Windows box: preserve as-is
+      const plain = dp.unprotectOne(stored.slice(MARKER2.length));
+      if (plain === null) { log('secret decrypt failed (dpapi)'); return stored; }
+      return plain;
+    }
+    if (!stored.startsWith(MARKER)) return stored;
     try { return safeStorage.decryptString(Buffer.from(stored.slice(MARKER.length), 'base64')); }
     catch (e) { log('secret decrypt failed: ' + e.message); return stored; }
   }
@@ -80,11 +103,13 @@ function createSecretStore({ safeStorage, loadApps, log = () => {} }) {
     }
   }
 
+  function isEncrypted(v) { return typeof v === 'string' && (v.startsWith(MARKER) || v.startsWith(MARKER2)); }
+
   // Walk every secret field of `g`; true if any holds a non-empty, not-yet-encrypted string.
   function gridHasPlaintextSecret(g) {
     let found = false;
     transformGridSecrets(g, v => {
-      if (typeof v === 'string' && v !== '' && !v.startsWith(MARKER)) found = true;
+      if (typeof v === 'string' && v !== '' && !isEncrypted(v)) found = true;
       return v;
     });
     return found;
@@ -107,14 +132,37 @@ function createSecretStore({ safeStorage, loadApps, log = () => {} }) {
     if ((config && Array.isArray(config.grids) ? config.grids : []).some(gridHasPlaintextSecret)) return true;
     let found = false;
     transformSettingsSecrets(structuredClone(config || {}), v => {
-      if (typeof v === 'string' && v !== '' && !v.startsWith(MARKER)) found = true;
+      if (typeof v === 'string' && v !== '' && !isEncrypted(v)) found = true;
       return v;
     });
     return found;
   }
 
+  // True when a save would change the at-rest form of the AS-LOADED config: plaintext secrets that
+  // need encrypting, or (on the DPAPI backend) legacy v1 values that still decrypt and should be
+  // re-wrapped as v2. Dead v1 ciphertexts (decrypt fails) do NOT trigger a rewrite — they are
+  // preserved as-is until the user re-enters them.
+  function needsRewrite(config) {
+    if (hasPlaintextSecret(config)) return true;
+    if (!dp) return false;
+    let found = false;
+    const probe = v => {
+      // Silent v1 decrypt attempt (no decryptValue, whose failure log would double up with
+      // decryptConfig's own pass right after this): dead v1 values just don't trigger a rewrite.
+      if (typeof v === 'string' && v.startsWith(MARKER)) {
+        try { safeStorage.decryptString(Buffer.from(v.slice(MARKER.length), 'base64')); found = true; }
+        catch (e) {}
+      }
+      return v;
+    };
+    (config && Array.isArray(config.grids) ? config.grids : []).forEach(g => transformGridSecrets(g, probe));
+    transformSettingsSecrets(structuredClone(config || {}), probe);
+    return found;
+  }
+
   return {
     MARKER,
+    MARKER2,
     available,
     encryptValue,
     decryptValue,
@@ -122,7 +170,8 @@ function createSecretStore({ safeStorage, loadApps, log = () => {} }) {
     encryptConfig,
     decryptConfig,
     hasPlaintextSecret,
+    needsRewrite,
   };
 }
 
-module.exports = { createSecretStore, MARKER };
+module.exports = { createSecretStore, MARKER, MARKER2 };
