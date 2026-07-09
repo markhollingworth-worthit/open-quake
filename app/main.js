@@ -287,11 +287,23 @@ function appCatalog() {
   // Drop-in apps live ONLY in the user-data folder (%APPDATA%/%LOCALAPPDATA%) so they survive
   // app updates — we deliberately do NOT scan the bundled install dir for drop-in folders.
   scanAppDir(dropInDir(), apps, ids, servedApps);
+  // Built-in served apps that declare oauth use per-app token isolation just like drop-in apps.
+  // They are served at /{id} (not /apps/{id}/…) so they get a separate builtin:true marker.
+  for (const app of apps) {
+    if (!app._folder && app.served && app.oauth && typeof app.oauth === 'object' && app.oauth.provider && !servedApps[app.id]) {
+      servedApps[app.id] = { root: null, proxy: null, server: null, oauth: app.oauth, builtin: true };
+    }
+  }
   return { apps, servedApps };
 }
 // Bundled local apps (apps/apps.json) plus drop-in app folders (user-data dir only).
 function loadApps() { return appCatalog().apps; }
 function discoveredServedApps() { return appCatalog().servedApps; }
+// IDs of built-in served apps that use per-app OAuth (served at /{id}, not /apps/{id}/…).
+function builtInServedAppIds() {
+  const cat = appCatalog();
+  return Object.keys(cat.servedApps).filter(id => cat.servedApps[id].builtin);
+}
 
 // ---- drop-in app manager (Settings → Drop-In Apps): list / import (zip) / export (zip) / delete ----
 // Zip via Windows' built-in Expand-Archive / Compress-Archive (no extra dependency). Windows-only.
@@ -431,19 +443,31 @@ function getSharedOAuthCallbackServer() {
 }
 const oauthHandler = new OAuthHandler({ storage: oauthStorage, openExternal: openExternalUrl, log: m => console.log(m), getCallbackServer: getSharedOAuthCallbackServer });
 oauthCallbackHandlers.add(oauthHandler);
-// Per-app OAuth handlers — one per drop-in app that declares oauth in its manifest.
+// Per-app OAuth handlers — one per drop-in (or built-in) app that declares oauth in its manifest.
 // Each uses a separate AppTokenStorage so app tokens are fully isolated from the system's.
 const appOAuthHandlers = new Map();
 function getOrCreateAppOAuthHandler(appId) {
   if (appOAuthHandlers.has(appId)) return appOAuthHandlers.get(appId);
   const appInfo = discoveredServedApps()[appId];
   const oauth = appInfo && appInfo.oauth;
-  if (!oauth || !oauth.clientId) {
+  if (!oauth) {
+    const err = new Error('App "' + appId + '" does not declare an oauth config in its manifest');
+    err.code = 'no_oauth_config';
+    throw err;
+  }
+  // Drop-in apps declare their own clientId in the manifest. Built-in apps (builtin: true) fall
+  // back to the system provider's clientId so the user only registers one Azure/OAuth app.
+  let clientId = oauth.clientId || '';
+  if (!clientId && appInfo.builtin) {
+    const provider = oauth.provider || 'microsoft';
+    clientId = oauthStorage.getProviderSettings(provider).clientId || '';
+  }
+  if (!clientId) {
     const err = new Error('App "' + appId + '" does not declare an oauth.clientId in its manifest');
     err.code = 'no_oauth_config';
     throw err;
   }
-  const storage = new AppTokenStorage({ appId, clientId: oauth.clientId, getConfig: () => config, saveConfig });
+  const storage = new AppTokenStorage({ appId, clientId, getConfig: () => config, saveConfig });
   const handler = new OAuthHandler({ storage, openExternal: openExternalUrl, log: m => console.log('[oauth:' + appId + '] ' + m), getCallbackServer: getSharedOAuthCallbackServer });
   oauthCallbackHandlers.add(handler);
   appOAuthHandlers.set(appId, handler);
@@ -549,12 +573,12 @@ async function connectOAuthFor(provider, scopes) {
   return { ok: true };
 }
 
-// Retrieve valid tokens for a drop-in app using its own OAuth handler and isolated token store.
+// Retrieve valid tokens for a drop-in or built-in app using its own OAuth handler and isolated token store.
 // The provider is always taken from the app's manifest declaration, not the caller argument.
 async function validAppOAuthTokensFor(appId, provider, scopes) {
   const appInfo = discoveredServedApps()[appId];
   const oauth = appInfo && appInfo.oauth;
-  if (!oauth || !oauth.clientId) {
+  if (!oauth) {
     const err = new Error('App "' + appId + '" does not have an OAuth registration configured in its manifest');
     err.code = 'no_oauth_config';
     throw err;
@@ -562,45 +586,61 @@ async function validAppOAuthTokensFor(appId, provider, scopes) {
   return getOrCreateAppOAuthHandler(appId).getValidTokens(oauth.provider || provider, scopes);
 }
 
-// Trigger the OAuth consent flow for a drop-in app.  Requires one-time user approval before
-// opening the browser, then delegates to the app's own isolated OAuthHandler.
+// Trigger the OAuth consent flow for a drop-in or built-in app.  Drop-in apps require one-time
+// user approval before opening the browser; built-in first-party apps skip that gate.
 async function connectAppOAuthFor(appId, provider, scopes) {
   const appInfo = discoveredServedApps()[appId];
   const oauth = appInfo && appInfo.oauth;
-  if (!oauth || !oauth.clientId) {
+  if (!oauth) {
+    const err = new Error('App "' + appId + '" does not have an OAuth registration configured in its manifest');
+    err.code = 'no_oauth_config';
+    throw err;
+  }
+  // Built-in apps use the system clientId; ensure it is configured before proceeding.
+  if (!oauth.clientId && appInfo.builtin) {
+    const sysProvider = oauth.provider || provider;
+    const sysClientId = oauthStorage.getProviderSettings(sysProvider).clientId || '';
+    if (!sysClientId) {
+      const err = new Error('Microsoft client ID is not configured. Please add it in Settings → Auth.');
+      err.code = 'no_oauth_config';
+      throw err;
+    }
+  } else if (!oauth.clientId) {
     const err = new Error('App "' + appId + '" does not have an OAuth registration configured in its manifest');
     err.code = 'no_oauth_config';
     throw err;
   }
   const canonProvider = oauth.provider || provider;
-  // Require explicit user approval (once per app+provider pair).
-  const approvals = ((config.settings || {}).oauth || {}).appApprovals || {};
-  if (!(approvals[appId] && approvals[appId][canonProvider])) {
-    const appDef = loadApps().find(a => a.id === appId);
-    const appName = (appDef && appDef.name) || appId;
-    const providerDef = oauthProviders[canonProvider];
-    const providerName = (providerDef && providerDef.name) || canonProvider;
-    const scopeArr = Array.isArray(scopes) ? scopes : (typeof scopes === 'string' && scopes ? scopes.split(/[,\s]+/).filter(Boolean) : []);
-    const { response } = await dialog.showMessageBox({
-      type: 'question',
-      title: 'OAuth Access Request',
-      message: `"${appName}" wants to connect to ${providerName}`,
-      detail: (scopeArr.length ? 'Requested access: ' + scopeArr.join(', ') + '\n\n' : '') + 'Only allow this if you trust this drop-in app.',
-      buttons: ['Allow', 'Deny'],
-      defaultId: 0,
-      cancelId: 1,
-    });
-    if (response !== 0) {
-      const err = new Error('User denied OAuth access for app "' + appId + '"');
-      err.code = 'user_denied';
-      throw err;
+  // Require explicit user approval for drop-in (untrusted) apps; skip for built-in first-party apps.
+  if (!appInfo.builtin) {
+    const approvals = ((config.settings || {}).oauth || {}).appApprovals || {};
+    if (!(approvals[appId] && approvals[appId][canonProvider])) {
+      const appDef = loadApps().find(a => a.id === appId);
+      const appName = (appDef && appDef.name) || appId;
+      const providerDef = oauthProviders[canonProvider];
+      const providerName = (providerDef && providerDef.name) || canonProvider;
+      const scopeArr = Array.isArray(scopes) ? scopes : (typeof scopes === 'string' && scopes ? scopes.split(/[,\s]+/).filter(Boolean) : []);
+      const { response } = await dialog.showMessageBox({
+        type: 'question',
+        title: 'OAuth Access Request',
+        message: `"${appName}" wants to connect to ${providerName}`,
+        detail: (scopeArr.length ? 'Requested access: ' + scopeArr.join(', ') + '\n\n' : '') + 'Only allow this if you trust this drop-in app.',
+        buttons: ['Allow', 'Deny'],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      if (response !== 0) {
+        const err = new Error('User denied OAuth access for app "' + appId + '"');
+        err.code = 'user_denied';
+        throw err;
+      }
+      if (!config.settings) config.settings = {};
+      if (!config.settings.oauth) config.settings.oauth = { providers: {}, tokens: {}, appTokens: {}, appApprovals: {} };
+      if (!config.settings.oauth.appApprovals) config.settings.oauth.appApprovals = {};
+      if (!config.settings.oauth.appApprovals[appId]) config.settings.oauth.appApprovals[appId] = {};
+      config.settings.oauth.appApprovals[appId][canonProvider] = true;
+      saveConfig();
     }
-    if (!config.settings) config.settings = {};
-    if (!config.settings.oauth) config.settings.oauth = { providers: {}, tokens: {}, appTokens: {}, appApprovals: {} };
-    if (!config.settings.oauth.appApprovals) config.settings.oauth.appApprovals = {};
-    if (!config.settings.oauth.appApprovals[appId]) config.settings.oauth.appApprovals[appId] = {};
-    config.settings.oauth.appApprovals[appId][canonProvider] = true;
-    saveConfig();
   }
   await getOrCreateAppOAuthHandler(appId).connect(canonProvider, scopes);
   return { ok: true };
@@ -1489,7 +1529,7 @@ app.whenReady().then(async () => {
   // Lazy-required so a metrics/load failure can never crash the rest of the app.
   try {
     sysserver = require('./sysserver');
-    serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onAppLaunch, getGridTiles: getActiveAppTiles, getAppConfig: activeServedAppConfig, getOAuthTokens: validOAuthTokensFor, connectOAuth: connectOAuthFor, getAppOAuthTokens: validAppOAuthTokensFor, connectAppOAuth: connectAppOAuthFor, onOpenExternal: openExternalUrl, onMeetingAction: onMeetingActionRequest, appFolders: discoveredServedApps() });
+    serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onAppLaunch, getGridTiles: getActiveAppTiles, getAppConfig: activeServedAppConfig, getOAuthTokens: validOAuthTokensFor, connectOAuth: connectOAuthFor, getAppOAuthTokens: validAppOAuthTokensFor, connectAppOAuth: connectAppOAuthFor, onOpenExternal: openExternalUrl, onMeetingAction: onMeetingActionRequest, appFolders: discoveredServedApps(), builtInApps: builtInServedAppIds() });
     ensureSystemViewPage(serverPort); ensureMusicPage(); ensureDropInDir();
     const haUrl = configureHaSchedule();
     console.log('SystemView + Music on http://127.0.0.1:' + serverPort + (haUrl ? ' · HA Schedule -> ' + haUrl : ''));
@@ -1597,6 +1637,7 @@ app.whenReady().then(async () => {
     if (!isFrom(e, configWin)) return [];
     const catalog = appCatalog();
     try { if (sysserver && sysserver.setAppFolders) sysserver.setAppFolders(catalog.servedApps); } catch (er) {}
+    try { if (sysserver && sysserver.setBuiltInApps) sysserver.setBuiltInApps(Object.keys(catalog.servedApps).filter(id => catalog.servedApps[id].builtin)); } catch (er) {}
     // Clean up OAuth handlers for apps that are no longer installed.
     for (const appId of appOAuthHandlers.keys()) {
       if (!catalog.servedApps[appId]) {

@@ -152,7 +152,8 @@
         { "label": "Office", "icon": "O", "type": "url", "value": "https://www.office.com" }
       ]
     },
-    "options": []
+    "options": [],
+    "oauth": { "provider": "microsoft" }
   },
   {
     "id": "ha-dashboard",

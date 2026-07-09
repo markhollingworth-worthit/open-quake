@@ -64,6 +64,7 @@ let server = null, onMedia = null, onLaunch = null, getGridTiles = null, getAppC
 let sysHtml = FALLBACK, musicHtml = FALLBACK, chatHtml = FALLBACK, officeHtml = FALLBACK, hascheduleHtml = FALLBACK, agendaHtml = FALLBACK, eventsHtml = FALLBACK, meetingHtml = FALLBACK;
 const staticAssets = {};   // request path -> { body, type }; populated at start()
 let appFolders = {};        // drop-in served app id -> { root, proxy }; supplied by main.js
+let builtInApps = new Set(); // first-party served app ids that use per-app OAuth (served at /{id})
 const appServers = {};      // app id -> required server module
 
 function headers(type) { return { 'Content-Type': type, 'Cache-Control': 'no-store', 'Content-Security-Policy': LOCAL_APP_CSP }; }
@@ -76,6 +77,9 @@ function setAppFolders(folders) {
   Object.entries(folders || {}).forEach(([id, value]) => {
     appFolders[id] = typeof value === 'string' ? { root: value, proxy: null } : Object.assign({}, value || {});
   });
+}
+function setBuiltInApps(ids) {
+  builtInApps = new Set(Array.isArray(ids) ? ids : []);
 }
 
 const MIME = {
@@ -127,8 +131,12 @@ function requestingAppId(req) {
   try {
     const u = new URL(ref);
     if (u.protocol !== 'http:' || !(u.hostname === '127.0.0.1' || u.hostname === 'localhost') || Number(u.port) !== loopbackPort()) return null;
+    // Check drop-in apps served at /apps/{id}/…
     const m = /^\/apps\/([A-Za-z0-9_-]+)\//.exec(u.pathname);
-    return m && appFolders[m[1]] ? m[1] : null;
+    if (m && appFolders[m[1]]) return m[1];
+    // Check built-in first-party served apps at /{id} (e.g. /office)
+    const bm = /^\/([A-Za-z0-9_-]+)$/.exec(u.pathname);
+    return bm && builtInApps.has(bm[1]) ? bm[1] : null;
   } catch (e) {
     return null;
   }
@@ -424,6 +432,7 @@ function start(opts) {
   onOpenExternal = opts.onOpenExternal || null;
   onMeetingAction = opts.onMeetingAction || null;
   setAppFolders(opts.appFolders);
+  setBuiltInApps(opts.builtInApps);
   nowplaying.setProvider(opts.getNowPlaying || null);
   return new Promise((resolve, reject) => {
     if (server) return resolve(server.address().port);
@@ -461,4 +470,4 @@ function stop() {
   if (server) { try { server.close(); } catch (e) {} server = null; }
 }
 
-module.exports = { start, stop, setActivePage, setAppFolders };
+module.exports = { start, stop, setActivePage, setAppFolders, setBuiltInApps };
