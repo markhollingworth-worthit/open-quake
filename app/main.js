@@ -15,7 +15,7 @@ const actionRunner = require('./actionRunner');
 const { createMediaKeys } = require('./mediaKeys');
 const { createSecretStore } = require('./secretStore');
 const { OAuthHandler } = require('../src/auth/oauth-handler');
-const { TokenStorage } = require('../src/auth/token-storage');
+const { TokenStorage, AppTokenStorage } = require('../src/auth/token-storage');
 const { providers: oauthProviders } = require('../src/auth/providers');
 const nowplaying = require('./nowplaying');   // same singleton sysserver polls — read its snapshot to target transport
 const haschedule = require('./haschedule');   // HA Schedule dev app — fed HA creds from .env, polled while shown
@@ -277,7 +277,7 @@ function scanAppDir(baseDir, apps, ids, servedApps) {
     });
     apps.push(def);
     ids.add(id);
-    if (def.served) servedApps[id] = { root: appDir, proxy: manifest.proxy || null, server: serverEntry ? path.join(appDir, serverEntry) : null };
+    if (def.served) servedApps[id] = { root: appDir, proxy: manifest.proxy || null, server: serverEntry ? path.join(appDir, serverEntry) : null, oauth: manifest.oauth && typeof manifest.oauth === 'object' && typeof manifest.oauth.clientId === 'string' && manifest.oauth.clientId.trim() ? manifest.oauth : null };
   });
 }
 function appCatalog() {
@@ -398,7 +398,57 @@ const secretStore = createSecretStore({
   log: m => console.log(m),
 });
 const oauthStorage = new TokenStorage({ getConfig: () => config, saveConfig });
-const oauthHandler = new OAuthHandler({ storage: oauthStorage, openExternal: openExternalUrl, log: m => console.log(m) });
+// All OAuthHandler instances (system + per-app) share a single callback server so that only one
+// listener binds port 5173, which is registered as the redirect_uri in all OAuth app registrations.
+const oauthCallbackHandlers = new Set();
+let sharedOAuthCallbackServer = null;
+function getSharedOAuthCallbackServer() {
+  if (sharedOAuthCallbackServer) return Promise.resolve(sharedOAuthCallbackServer);
+  return new Promise((resolve, reject) => {
+    const srv = http.createServer((req, res) => {
+      const urlObj = new URL(req.url || '/', 'http://localhost:5173');
+      if (req.method !== 'GET' || urlObj.pathname !== '/oauth/callback') { res.writeHead(404); res.end(); return; }
+      const state = urlObj.searchParams.get('state') || '';
+      const handler = [...oauthCallbackHandlers].find(h => h.pending.has(state));
+      if (!handler) {
+        res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end('<!doctype html><meta charset="utf-8"><title>open-quake OAuth</title><body style="font:16px Segoe UI,sans-serif;background:#101820;color:#f3b4a5">OAuth state was not recognized.</body>');
+        return;
+      }
+      handler.handleCallback(urlObj).then(result => {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end('<!doctype html><meta charset="utf-8"><title>open-quake OAuth</title><body style="font:16px Segoe UI,sans-serif;background:#101820;color:#e8f1fb">Connected. You can close this window.</body>');
+        handler.log('[oauth] connected ' + result.provider);
+      }).catch(e => {
+        res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end('<!doctype html><meta charset="utf-8"><title>open-quake OAuth</title><body style="font:16px Segoe UI,sans-serif;background:#101820;color:#f3b4a5">OAuth failed: ' + String(e.message || e).replace(/[<>&"]/g, '') + '</body>');
+        handler.log('[oauth] callback failed: ' + (e.message || e));
+      });
+    });
+    srv.once('error', err => { sharedOAuthCallbackServer = null; reject(new Error('Could not listen on localhost:5173 for OAuth callback: ' + (err.message || err))); });
+    srv.listen(5173, '127.0.0.1', () => { sharedOAuthCallbackServer = srv; resolve(srv); });
+  });
+}
+const oauthHandler = new OAuthHandler({ storage: oauthStorage, openExternal: openExternalUrl, log: m => console.log(m), getCallbackServer: getSharedOAuthCallbackServer });
+oauthCallbackHandlers.add(oauthHandler);
+// Per-app OAuth handlers — one per drop-in app that declares oauth in its manifest.
+// Each uses a separate AppTokenStorage so app tokens are fully isolated from the system's.
+const appOAuthHandlers = new Map();
+function getOrCreateAppOAuthHandler(appId) {
+  if (appOAuthHandlers.has(appId)) return appOAuthHandlers.get(appId);
+  const appInfo = discoveredServedApps()[appId];
+  const oauth = appInfo && appInfo.oauth;
+  if (!oauth || !oauth.clientId) {
+    const err = new Error('App "' + appId + '" does not declare an oauth.clientId in its manifest');
+    err.code = 'no_oauth_config';
+    throw err;
+  }
+  const storage = new AppTokenStorage({ appId, clientId: oauth.clientId, getConfig: () => config, saveConfig });
+  const handler = new OAuthHandler({ storage, openExternal: openExternalUrl, log: m => console.log('[oauth:' + appId + '] ' + m), getCallbackServer: getSharedOAuthCallbackServer });
+  oauthCallbackHandlers.add(handler);
+  appOAuthHandlers.set(appId, handler);
+  return handler;
+}
 
 // Build the file: URL for an app page, encoding its options as a #hash (file:// drops a ?query).
 function appOptionQuery(def, opts, include) {
@@ -496,6 +546,63 @@ async function validOAuthTokensFor(provider, scopes) {
 
 async function connectOAuthFor(provider, scopes) {
   await oauthHandler.connect(provider, scopes);
+  return { ok: true };
+}
+
+// Retrieve valid tokens for a drop-in app using its own OAuth handler and isolated token store.
+// The provider is always taken from the app's manifest declaration, not the caller argument.
+async function validAppOAuthTokensFor(appId, provider, scopes) {
+  const appInfo = discoveredServedApps()[appId];
+  const oauth = appInfo && appInfo.oauth;
+  if (!oauth || !oauth.clientId) {
+    const err = new Error('App "' + appId + '" does not have an OAuth registration configured in its manifest');
+    err.code = 'no_oauth_config';
+    throw err;
+  }
+  return getOrCreateAppOAuthHandler(appId).getValidTokens(oauth.provider || provider, scopes);
+}
+
+// Trigger the OAuth consent flow for a drop-in app.  Requires one-time user approval before
+// opening the browser, then delegates to the app's own isolated OAuthHandler.
+async function connectAppOAuthFor(appId, provider, scopes) {
+  const appInfo = discoveredServedApps()[appId];
+  const oauth = appInfo && appInfo.oauth;
+  if (!oauth || !oauth.clientId) {
+    const err = new Error('App "' + appId + '" does not have an OAuth registration configured in its manifest');
+    err.code = 'no_oauth_config';
+    throw err;
+  }
+  const canonProvider = oauth.provider || provider;
+  // Require explicit user approval (once per app+provider pair).
+  const approvals = ((config.settings || {}).oauth || {}).appApprovals || {};
+  if (!(approvals[appId] && approvals[appId][canonProvider])) {
+    const appDef = loadApps().find(a => a.id === appId);
+    const appName = (appDef && appDef.name) || appId;
+    const providerDef = oauthProviders[canonProvider];
+    const providerName = (providerDef && providerDef.name) || canonProvider;
+    const scopeArr = Array.isArray(scopes) ? scopes : (typeof scopes === 'string' && scopes ? scopes.split(/[,\s]+/).filter(Boolean) : []);
+    const { response } = await dialog.showMessageBox({
+      type: 'question',
+      title: 'OAuth Access Request',
+      message: `"${appName}" wants to connect to ${providerName}`,
+      detail: (scopeArr.length ? 'Requested access: ' + scopeArr.join(', ') + '\n\n' : '') + 'Only allow this if you trust this drop-in app.',
+      buttons: ['Allow', 'Deny'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response !== 0) {
+      const err = new Error('User denied OAuth access for app "' + appId + '"');
+      err.code = 'user_denied';
+      throw err;
+    }
+    if (!config.settings) config.settings = {};
+    if (!config.settings.oauth) config.settings.oauth = { providers: {}, tokens: {}, appTokens: {}, appApprovals: {} };
+    if (!config.settings.oauth.appApprovals) config.settings.oauth.appApprovals = {};
+    if (!config.settings.oauth.appApprovals[appId]) config.settings.oauth.appApprovals[appId] = {};
+    config.settings.oauth.appApprovals[appId][canonProvider] = true;
+    saveConfig();
+  }
+  await getOrCreateAppOAuthHandler(appId).connect(canonProvider, scopes);
   return { ok: true };
 }
 async function pushToPanel() {
@@ -1382,7 +1489,7 @@ app.whenReady().then(async () => {
   // Lazy-required so a metrics/load failure can never crash the rest of the app.
   try {
     sysserver = require('./sysserver');
-    serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onAppLaunch, getGridTiles: getActiveAppTiles, getAppConfig: activeServedAppConfig, getOAuthTokens: validOAuthTokensFor, connectOAuth: connectOAuthFor, onOpenExternal: openExternalUrl, onMeetingAction: onMeetingActionRequest, appFolders: discoveredServedApps() });
+    serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onAppLaunch, getGridTiles: getActiveAppTiles, getAppConfig: activeServedAppConfig, getOAuthTokens: validOAuthTokensFor, connectOAuth: connectOAuthFor, getAppOAuthTokens: validAppOAuthTokensFor, connectAppOAuth: connectAppOAuthFor, onOpenExternal: openExternalUrl, onMeetingAction: onMeetingActionRequest, appFolders: discoveredServedApps() });
     ensureSystemViewPage(serverPort); ensureMusicPage(); ensureDropInDir();
     const haUrl = configureHaSchedule();
     console.log('SystemView + Music on http://127.0.0.1:' + serverPort + (haUrl ? ' · HA Schedule -> ' + haUrl : ''));
@@ -1422,6 +1529,12 @@ app.whenReady().then(async () => {
   // refresh from the Auth tab. Skipped when Use HA is off or credentials are missing.
   if ((config.settings && config.settings.haAuth && config.settings.haAuth.useHa)) refreshHaCache();
   oauthHandler.scheduleAll();
+  // Schedule token refresh for any drop-in apps that already have stored tokens.
+  const storedAppTokens = ((config.settings || {}).oauth || {}).appTokens || {};
+  Object.keys(storedAppTokens).forEach(appId => {
+    try { getOrCreateAppOAuthHandler(appId).scheduleAll(); }
+    catch (e) { console.log('[oauth] could not schedule app refresh for', appId + ':', e.message); }
+  });
 
   ipcMain.on('launch', (e, a) => { if (!isFrom(e, panelWin)) return; runAction(a); });
   ipcMain.on('volume', (e, v) => { if (!isFrom(e, panelWin)) return; mediaKeys.volume(v); });
@@ -1484,6 +1597,15 @@ app.whenReady().then(async () => {
     if (!isFrom(e, configWin)) return [];
     const catalog = appCatalog();
     try { if (sysserver && sysserver.setAppFolders) sysserver.setAppFolders(catalog.servedApps); } catch (er) {}
+    // Clean up OAuth handlers for apps that are no longer installed.
+    for (const appId of appOAuthHandlers.keys()) {
+      if (!catalog.servedApps[appId]) {
+        const h = appOAuthHandlers.get(appId);
+        try { h.stop(); } catch (e) {}
+        oauthCallbackHandlers.delete(h);
+        appOAuthHandlers.delete(appId);
+      }
+    }
     return catalog.apps;
   });
   ipcMain.on('saveConfigFromEditor', (e, newCfg) => {
@@ -1618,6 +1740,7 @@ app.on('window-all-closed', () => {});
 app.on('before-quit', () => {
   try { dev.stop(); } catch (e) {}                       // close HID devices + clear keep-alive/rescan timers — an open node-hid handle blocks process exit (Cmd+Q would hang -> force-quit)
   try { oauthHandler.stop(); } catch (e) {}              // stop OAuth callback server + background refresh timers
+  appOAuthHandlers.forEach(h => { try { h.stop(); } catch (e) {} }); // stop per-app OAuth handlers
   try { if (sysserver) sysserver.stop(); } catch (e) {}  // stop metrics timers + close the local server
   try { if (dashSession) dashSession.cookies.flushStore(); } catch (e) {}   // commit a fresh webview login to disk before exit
   try { globalShortcut.unregisterAll(); } catch (e) {}   // drop per-page hotkeys

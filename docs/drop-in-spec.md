@@ -76,6 +76,7 @@ uses all of them at once. See `apps/apps.json` or any `community-apps/` folder f
 | `options` | array | no | User-set option descriptors (§2.5). Default `[]`. |
 | `server` | string | served only | Relative path to a host-side Node module (§5.1). Triggers the exec-code warning on import. |
 | `proxy` | object | served only | Outbound-fetch allow-list for the app's page (§5.2). |
+| `oauth` | object | served only | Per-app OAuth registration for cloud-account access (§5.4). |
 | `grid` | object | served only | OPTIONAL embedded editable tile grid carried by the app: `{ cols, rows, defaults }` (column/row count + default tile contents). MAY be ignored by a host that doesn't support in-app grids. |
 | `hideGridInEditor` | bool | no | When `true`, the editor hides this app's embedded-grid controls (the app manages its own layout). Default `false`. |
 | `dev` | bool | no | Marks the app as developer-only; a conforming host MAY hide it from the normal app picker behind a "show developer apps" toggle. Purely a discoverability hint — carries no security meaning. |
@@ -251,6 +252,44 @@ app that needs its options server-trip-free.
 gated** (§6.2), so only the host's own served page can read it. This is the only channel by
 which secrets reach a served app; they are never in the URL.
 
+### 5.4 Per-app OAuth (`oauth`)
+
+Drop-in apps that need access to a user's cloud account (Microsoft Graph, GitHub, Google, etc.)
+MUST declare their own OAuth app registration in the manifest. They **cannot** access the host's
+system-level OAuth credentials, which belong exclusively to the host's built-in features.
+
+```json
+{
+  "oauth": {
+    "provider": "microsoft",
+    "clientId": "your-own-azure-app-client-id",
+    "scopes": ["User.Read", "offline_access"]
+  }
+}
+```
+
+| `oauth` key | Required | Meaning |
+| --- | --- | --- |
+| `provider` | **yes** | Provider id: `microsoft`, `github`, or `google`. |
+| `clientId` | **yes** | The app's own OAuth client id (registered in the provider's developer portal). |
+| `scopes` | no | Default scopes requested. The page may request additional scopes at runtime. |
+
+**Token isolation.** Tokens obtained for one drop-in app are stored under that app's id and are
+never accessible to other apps or to the host's built-in features.
+
+**User approval.** The first time an app triggers `GET /api/oauth-connect`, the host MUST
+show a system-level approval dialog naming the app and provider before opening the browser.
+Subsequent requests reuse the stored approval.
+
+**Page API.** The served page calls the same routes used by built-in pages:
+
+- `GET /api/oauth-tokens.json?provider=<id>&scopes=<list>` — returns `{ ok, accessToken, scope, … }` or `{ ok:false, error, code }`. The host routes this to the app's own token store.
+- `GET /api/oauth-connect?provider=<id>&scopes=<list>` — triggers the OAuth consent flow (shows the approval dialog on first use, then opens the browser).
+
+**No shared credentials.** An app MUST NOT omit `oauth.clientId` and rely on the host to supply
+one. A conforming host MUST reject token and connect requests from drop-in apps that have no
+`oauth` declaration in their manifest.
+
 ---
 
 ## 6. Security model (normative)
@@ -353,6 +392,9 @@ host-specific and SHOULD degrade gracefully where the extension is absent.
 | Proxy + SSRF guards | `app/sysserver.js` — `proxyAllowed`, `privateHost`, `verifySslFor`, `proxyFetch`, `serveAppProxy` |
 | Server module + API | `app/sysserver.js` — `appServer`, `serveAppApi` |
 | Loopback hardening | `app/sysserver.js` — `hostOk`, `sameOrigin`, `requestingAppId` |
+| Per-app OAuth token storage | `src/auth/token-storage.js` — `AppTokenStorage` |
+| Per-app OAuth handlers + shared callback server | `app/main.js` — `oauthCallbackHandlers`, `getSharedOAuthCallbackServer`, `getOrCreateAppOAuthHandler`, `validAppOAuthTokensFor`, `connectAppOAuthFor` |
+| OAuth route dispatch (system vs app) | `app/sysserver.js` — `/api/oauth-tokens.json`, `/api/oauth-connect` handlers |
 | Manager bridge | `app/config-preload.js`, IPC handlers in `app/main.js` |
 | Author guide / template | `docs/apps.md`, `docs/app-template/` |
 

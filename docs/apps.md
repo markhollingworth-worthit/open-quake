@@ -127,6 +127,55 @@ Served drop-in apps can also declare host-side helpers:
   URLs allowed by the app manifest. `{ "option": "host" }` allows requests to the
   configured host origin, including LAN devices.
 
+### OAuth for drop-in apps
+
+If your app needs to call a cloud API (Microsoft Graph, GitHub, Google, etc.) on behalf of
+the user, you must register your own OAuth application with the provider and declare it in
+the manifest. **Each drop-in app uses its own OAuth registration — it cannot share the
+system's credentials.**
+
+```json
+{
+  "oauth": {
+    "provider": "microsoft",
+    "clientId": "your-azure-app-client-id",
+    "scopes": ["User.Read", "offline_access"]
+  }
+}
+```
+
+Supported providers: `microsoft` (Microsoft Graph / Azure AD), `github`, `google`.
+
+**How it works:**
+
+1. The user installs your app. The manifest's `oauth.clientId` is your Azure / GitHub /
+   Google app registration.
+2. The first time your page calls `GET /api/oauth-connect`, the host shows an approval
+   dialog: *"[Your app] wants to connect to Microsoft 365 — Allow / Deny?"*. The user
+   approves once; subsequent calls skip the dialog.
+3. After approval, the browser opens to the provider's consent page. On success, a token
+   is stored under your app's id (isolated from the system and every other app).
+4. Your page fetches tokens with `GET /api/oauth-tokens.json?provider=microsoft&scopes=User.Read`.
+
+```js
+// In your app's page JavaScript:
+async function getToken() {
+  const r = await fetch('/api/oauth-tokens.json?provider=microsoft&scopes=User.Read');
+  const data = await r.json();
+  if (!data.ok) {
+    if (data.code === 'consent_required') {
+      // Prompt the user, then call /api/oauth-connect
+      await fetch('/api/oauth-connect?provider=microsoft&scopes=User.Read+offline_access');
+    }
+    return null;
+  }
+  return data.accessToken;
+}
+```
+
+Token storage is fully isolated per app — your tokens are never readable by other drop-in
+apps or by the host's built-in features.
+
 See `docs/app-template/` for a minimal starting point.
 
 ### Authoring with Claude Code

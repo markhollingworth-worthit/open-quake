@@ -45,13 +45,14 @@ function hasScopes(tokens, requested) {
 }
 
 class OAuthHandler {
-  constructor({ storage, openExternal, log = () => {} }) {
+  constructor({ storage, openExternal, log = () => {}, getCallbackServer }) {
     this.storage = storage;
     this.openExternal = openExternal;
     this.log = log;
     this.pending = new Map();
     this.callbackServer = null;
     this.refreshTimers = new Map();
+    this._getCallbackServer = typeof getCallbackServer === 'function' ? getCallbackServer : null;
   }
 
   provider(id) {
@@ -231,7 +232,7 @@ class OAuthHandler {
     if (!tokens || !tokens.refreshToken || !tokens.expiresAt) return;
     const delay = Math.max(30000, Number(tokens.expiresAt) - Date.now() - (provider.accessTokenExpiresSkewMs || 300000));
     this.refreshTimers.set(provider.id, setTimeout(() => {
-      this.refreshTokenIfNeeded(provider.id, true).catch(e => this.log('[oauth] refresh failed for ' + provider.id + ': ' + (e.message || e)));
+      this.refreshTokenIfNeeded(provider.id, true, tokens.scope || undefined).catch(e => this.log('[oauth] refresh failed for ' + provider.id + ': ' + (e.message || e)));
     }, delay));
   }
 
@@ -244,14 +245,17 @@ class OAuthHandler {
   stop() {
     for (const t of this.refreshTimers.values()) clearTimeout(t);
     this.refreshTimers.clear();
-    if (this.callbackServer) {
+    if (this.callbackServer && !this._getCallbackServer) {
       try { this.callbackServer.close(); } catch (e) {}
-      this.callbackServer = null;
     }
+    this.callbackServer = null;
   }
 
   ensureCallbackServer() {
     if (this.callbackServer) return Promise.resolve();
+    if (this._getCallbackServer) {
+      return Promise.resolve(this._getCallbackServer()).then(server => { this.callbackServer = server; });
+    }
     return new Promise((resolve, reject) => {
       const server = http.createServer((req, res) => {
         const url = new URL(req.url || '/', 'http://localhost:5173');
