@@ -16,6 +16,34 @@ function formBody(obj) {
   return params;
 }
 
+function scopeList(scopes) {
+  if (Array.isArray(scopes)) return scopes.map(s => String(s || '').trim()).filter(Boolean);
+  if (typeof scopes === 'string') return scopes.split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
+  return [];
+}
+
+function uniqueScopes(scopes) {
+  return Array.from(new Set(scopeList(scopes)));
+}
+
+function scopesFor(provider, requested) {
+  return uniqueScopes([].concat(provider.scopes || [], scopeList(requested)));
+}
+
+function tokenScopes(tokens) {
+  return uniqueScopes(tokens && tokens.scope || []);
+}
+
+function comparableScope(scope) {
+  const s = String(scope || '').toLowerCase();
+  return s && s !== 'offline_access' && s !== 'openid' && s !== 'profile';
+}
+
+function hasScopes(tokens, requested) {
+  const have = new Set(tokenScopes(tokens).map(s => s.toLowerCase()));
+  return scopeList(requested).filter(comparableScope).every(s => have.has(s.toLowerCase()));
+}
+
 class OAuthHandler {
   constructor({ storage, openExternal, log = () => {} }) {
     this.storage = storage;
@@ -32,21 +60,22 @@ class OAuthHandler {
     return provider;
   }
 
-  async generateAuthUrl(providerId) {
+  async generateAuthUrl(providerId, requestedScopes) {
     const provider = this.provider(providerId);
     const settings = this.storage.getProviderSettings(provider.id);
     if (!settings.clientId) throw new Error(provider.name + ' client ID is required');
+    const requested = scopesFor(provider, requestedScopes);
     const state = base64Url(crypto.randomBytes(24));
     const verifier = base64Url(crypto.randomBytes(48));
     const challenge = base64Url(crypto.createHash('sha256').update(verifier).digest());
-    this.pending.set(state, { providerId: provider.id, verifier, createdAt: Date.now() });
+    this.pending.set(state, { providerId: provider.id, verifier, scopes: requested, createdAt: Date.now() });
 
     const params = new URLSearchParams({
       client_id: settings.clientId,
       response_type: 'code',
       redirect_uri: provider.redirectUri,
       response_mode: 'query',
-      scope: provider.scopes.join(' '),
+      scope: requested.join(' '),
       state,
       code_challenge: challenge,
       code_challenge_method: 'S256',
@@ -56,9 +85,9 @@ class OAuthHandler {
     return provider.authUrl + '?' + params.toString();
   }
 
-  async connect(providerId) {
+  async connect(providerId, requestedScopes) {
     await this.ensureCallbackServer();
-    const url = await this.generateAuthUrl(providerId);
+    const url = await this.generateAuthUrl(providerId, requestedScopes);
     if (!this.openExternal(url)) throw new Error('Could not open OAuth sign-in URL');
     return { ok: true };
   }
@@ -83,7 +112,7 @@ class OAuthHandler {
       redirect_uri: provider.redirectUri,
       code_verifier: pending.verifier,
     });
-    this.storage.setTokens(provider.id, this.normalizeToken(provider.id, token));
+    this.storage.setTokens(provider.id, this.normalizeToken(provider.id, token, pending.scopes));
     this.scheduleRefresh(provider.id);
     return { ok: true, provider: provider.id };
   }
@@ -103,7 +132,7 @@ class OAuthHandler {
     return data;
   }
 
-  normalizeToken(provider, token) {
+  normalizeToken(provider, token, requestedScopes) {
     const now = Date.now();
     const expiresIn = Number(token.expires_in || 3600);
     return {
@@ -112,14 +141,22 @@ class OAuthHandler {
       accessToken: token.access_token || '',
       refreshToken: token.refresh_token || '',
       expiresAt: now + Math.max(0, expiresIn) * 1000,
-      scope: token.scope || '',
+      scope: token.scope || scopeList(requestedScopes).join(' '),
     };
   }
 
-  async refreshTokenIfNeeded(providerId, force) {
+  async refreshTokenIfNeeded(providerId, force, requestedScopes) {
     const provider = this.provider(providerId);
+    const requested = scopesFor(provider, requestedScopes);
     const tokens = this.storage.getTokens(provider.id);
     if (!tokens || !tokens.refreshToken) return null;
+    if (!hasScopes(tokens, requested)) {
+      const err = new Error('Additional Microsoft consent is required for: ' + requested.filter(s => !hasScopes(tokens, [s])).join(' '));
+      err.code = 'consent_required';
+      err.provider = provider.id;
+      err.scopes = requested;
+      throw err;
+    }
     const skew = provider.accessTokenExpiresSkewMs || 300000;
     if (!force && tokens.accessToken && tokens.expiresAt && Date.now() < Number(tokens.expiresAt) - skew) {
       return tokens;
@@ -131,19 +168,19 @@ class OAuthHandler {
       client_secret: settings.clientSecret,
       refresh_token: tokens.refreshToken,
       redirect_uri: provider.redirectUri,
-      scope: provider.scopes.join(' '),
+      scope: requested.join(' '),
     });
     const merged = this.normalizeToken(provider.id, Object.assign({}, next, {
       refresh_token: next.refresh_token || tokens.refreshToken,
       scope: next.scope || tokens.scope || '',
-    }));
+    }), requested);
     this.storage.setTokens(provider.id, merged);
     this.scheduleRefresh(provider.id);
     return merged;
   }
 
-  async getValidTokens(providerId) {
-    const tokens = await this.refreshTokenIfNeeded(providerId, false);
+  async getValidTokens(providerId, requestedScopes) {
+    const tokens = await this.refreshTokenIfNeeded(providerId, false, requestedScopes);
     if (!tokens) return null;
     return {
       provider: tokens.provider,
@@ -152,6 +189,7 @@ class OAuthHandler {
       refreshToken: tokens.refreshToken,
       expiresAt: tokens.expiresAt,
       scope: tokens.scope || '',
+      scopes: tokenScopes(tokens),
     };
   }
 
@@ -179,7 +217,7 @@ class OAuthHandler {
   }
 
   listStatus() {
-    return ['teams', 'github', 'google'].map(id => this.status(id));
+    return ['microsoft', 'github', 'google'].map(id => this.status(id));
   }
 
   scheduleAll() {

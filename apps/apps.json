@@ -138,6 +138,23 @@
     ]
   },
   {
+    "id": "office",
+    "name": "Office",
+    "file": "office.html",
+    "served": true,
+    "grid": {
+      "cols": 2,
+      "rows": 2,
+      "defaults": [
+        { "label": "Outlook", "icon": "✉", "type": "url", "value": "https://outlook.office.com" },
+        { "label": "Teams", "icon": "T", "type": "url", "value": "https://teams.microsoft.com" },
+        { "label": "OneDrive", "icon": "☁", "type": "url", "value": "https://onedrive.live.com" },
+        { "label": "Office", "icon": "O", "type": "url", "value": "https://www.office.com" }
+      ]
+    },
+    "options": []
+  },
+  {
     "id": "ha-dashboard",
     "name": "Home Assistant Dashboard",
     "options": [

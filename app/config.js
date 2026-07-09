@@ -1711,7 +1711,7 @@
       <p class="hint">The token is stored encrypted at rest (same secret store as your dashboard tokens). It only leaves the main process for features that need it.</p>
 
       <p class="sectitle" style="margin-top:22px">OAuth 2.0</p>
-      <p class="hint">Connect services once, then local apps can request fresh tokens through IPC or <code>/api/oauth-tokens.json?provider=teams</code>. Tokens are encrypted at rest and refreshed before expiry.</p>
+      <p class="hint">Connect services once, then local apps can request fresh tokens through IPC or <code>/api/oauth-tokens.json?provider=microsoft&amp;scopes=Calendars.Read</code>. Tokens are encrypted at rest and refreshed before expiry.</p>
       <div id="sOauthList"><p class="hint">Loading OAuth providers...</p></div>`;
 
     // Drop-In Apps tab — manage user-installed app folders (import/export/delete) + storage location
@@ -1906,7 +1906,7 @@
               <span id="oauthMsg_${esc(p.provider)}" class="hint" style="margin:0 0 0 auto"></span>
             </div>
             <div class="row"><label>Client ID</label>
-              <input type="text" class="oauthClientId" data-provider="${esc(p.provider)}" value="${esc(p.clientId || '')}" ${p.enabled ? '' : 'disabled'} placeholder="Azure app client ID" style="flex:1"></div>
+              <input type="text" class="oauthClientId" data-provider="${esc(p.provider)}" value="${esc(p.clientId || '')}" ${p.enabled ? '' : 'disabled'} placeholder="Microsoft app client ID" style="flex:1"></div>
             <div class="row"><label>Scopes</label><span class="hint" style="margin:0">${esc((p.scopes || []).join(' '))}</span></div>
             <div class="row" style="gap:8px">
               <button class="oauthConnect" data-provider="${esc(p.provider)}" ${p.enabled ? '' : 'disabled'}>${p.connected ? 'Reconnect' : 'Connect'}</button>
@@ -1929,7 +1929,7 @@
             e.currentTarget.disabled = true;
             oauthMsg(id, 'Opening browser...');
             let r = await configApi.setOAuthProviderSettings(id, { clientId: input ? input.value : '' });
-            if (r && r.ok) r = await configApi.connectOAuthProvider(id);
+            if (r && r.ok) r = await configApi.connectOAuthProvider(id, ['User.Read', 'Presence.Read', 'Calendars.Read', 'offline_access']);
             oauthMsg(id, r && r.ok ? 'Finish sign-in in your browser.' : 'Connect failed: ' + ((r && r.error) || ''), !(r && r.ok));
             e.currentTarget.disabled = false;
             if (oauthPoll) clearInterval(oauthPoll);

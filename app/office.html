@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' http: https: file: data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: file: http: https:; font-src 'self' data:; connect-src 'self' https://graph.microsoft.com; media-src 'self' blob: data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none';">
+<title>Office</title>
+<link rel="stylesheet" href="/office.css">
+</head>
+<body>
+  <main id="wrap">
+    <section class="panel main">
+      <div class="top">
+        <div>
+          <p class="eyebrow">Microsoft 365</p>
+          <h1 id="name">Office</h1>
+        </div>
+        <div class="presence" id="presence">Not connected</div>
+      </div>
+      <div id="status" class="status">Connecting to Microsoft Graph...</div>
+      <div id="events" class="events"></div>
+    </section>
+    <section class="panel grid-panel">
+      <div class="grid" id="grid"></div>
+    </section>
+  </main>
+  <div id="auth" class="auth hidden">
+    <div class="auth-box">
+      <h2>Connect Microsoft 365</h2>
+      <p>This deck uses the global Open-Quake Microsoft connection for calendar and presence.</p>
+      <button id="connect">Connect</button>
+      <p id="authMsg"></p>
+    </div>
+  </div>
+<script src="/office.js"></script>
+</body>
+</html>

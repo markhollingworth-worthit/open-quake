@@ -482,16 +482,21 @@ function oauthProviderPayload() {
     const settings = oauthStorage.getProviderSettings(id);
     return Object.assign({}, oauthHandler.status(id), {
       name: p.name,
-      scopes: p.scopes,
+      scopes: p.suggestedScopes || p.scopes,
       clientId: settings.clientId || '',
       hasClientSecret: !!settings.clientSecret,
-      enabled: id === 'teams',
+      enabled: id === 'microsoft',
     });
   });
 }
 
-async function validOAuthTokens(provider) {
-  return oauthHandler.getValidTokens(provider);
+async function validOAuthTokensFor(provider, scopes) {
+  return oauthHandler.getValidTokens(provider, scopes);
+}
+
+async function connectOAuthFor(provider, scopes) {
+  await oauthHandler.connect(provider, scopes);
+  return { ok: true };
 }
 async function pushToPanel() {
   if (panelWin && !panelWin.isDestroyed()) {
@@ -1377,7 +1382,7 @@ app.whenReady().then(async () => {
   // Lazy-required so a metrics/load failure can never crash the rest of the app.
   try {
     sysserver = require('./sysserver');
-    serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onAppLaunch, getGridTiles: getActiveAppTiles, getAppConfig: activeServedAppConfig, getOAuthTokens: validOAuthTokens, onOpenExternal: openExternalUrl, onMeetingAction: onMeetingActionRequest, appFolders: discoveredServedApps() });
+    serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onAppLaunch, getGridTiles: getActiveAppTiles, getAppConfig: activeServedAppConfig, getOAuthTokens: validOAuthTokensFor, connectOAuth: connectOAuthFor, onOpenExternal: openExternalUrl, onMeetingAction: onMeetingActionRequest, appFolders: discoveredServedApps() });
     ensureSystemViewPage(serverPort); ensureMusicPage(); ensureDropInDir();
     const haUrl = configureHaSchedule();
     console.log('SystemView + Music on http://127.0.0.1:' + serverPort + (haUrl ? ' · HA Schedule -> ' + haUrl : ''));
@@ -1453,9 +1458,9 @@ app.whenReady().then(async () => {
     try { oauthStorage.setProviderSettings(provider, safePatch); return { ok: true, providers: oauthProviderPayload() }; }
     catch (err) { return { ok: false, error: err.message || String(err) }; }
   });
-  ipcMain.handle('connectOAuthProvider', async (e, provider) => {
+  ipcMain.handle('connectOAuthProvider', async (e, provider, scopes) => {
     if (!isFrom(e, configWin)) return { ok: false, error: 'unauthorized' };
-    try { await oauthHandler.connect(provider); return { ok: true, providers: oauthProviderPayload() }; }
+    try { await oauthHandler.connect(provider, scopes); return { ok: true, providers: oauthProviderPayload() }; }
     catch (err) { return { ok: false, error: err.message || String(err) }; }
   });
   ipcMain.handle('disconnectOAuthProvider', async (e, provider) => {
@@ -1463,9 +1468,9 @@ app.whenReady().then(async () => {
     try { const r = await oauthHandler.revokeToken(provider); return Object.assign({}, r, { providers: oauthProviderPayload() }); }
     catch (err) { return { ok: false, error: err.message || String(err) }; }
   });
-  ipcMain.handle('get-oauth-tokens', (e, provider) => {
+  ipcMain.handle('get-oauth-tokens', (e, provider, scopes) => {
     if (!isFrom(e, panelWin) && !isFrom(e, configWin)) return null;
-    return validOAuthTokens(provider).catch(err => ({ ok: false, error: err.message || String(err) }));
+    return validOAuthTokensFor(provider, scopes).catch(err => ({ ok: false, error: err.message || String(err), code: err.code || '', provider: err.provider || provider, scopes: err.scopes || scopes || [] }));
   });
   // HA cache: editor reads the registries + dashboards for picker UIs; refresh kicks a new fetchAll.
   // fetchHaEntityState is wired now for phase-2 features that assign an entity to a button.

@@ -3,13 +3,14 @@
 const REDIRECT_URI = 'http://localhost:5173/oauth/callback';
 
 const providers = {
-  teams: {
-    id: 'teams',
-    name: 'Microsoft Teams',
+  microsoft: {
+    id: 'microsoft',
+    name: 'Microsoft 365',
     authUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
     tokenUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
     revokeUrl: '',
-    scopes: ['Presence.Read', 'Calendars.Read', 'offline_access'],
+    scopes: ['User.Read', 'offline_access'],
+    suggestedScopes: ['User.Read', 'Presence.Read', 'Calendars.Read', 'offline_access'],
     redirectUri: REDIRECT_URI,
     usesPkce: true,
     accessTokenExpiresSkewMs: 5 * 60 * 1000,
@@ -38,8 +39,20 @@ const providers = {
   },
 };
 
+const aliases = {
+  teams: 'microsoft',
+  office: 'microsoft',
+  graph: 'microsoft',
+};
+
 function providerFor(id) {
-  return providers[String(id || '').toLowerCase()] || null;
+  const key = String(id || '').toLowerCase();
+  return providers[aliases[key] || key] || null;
 }
 
-module.exports = { REDIRECT_URI, providers, providerFor };
+function canonicalProviderId(id) {
+  const provider = providerFor(id);
+  return provider ? provider.id : String(id || '').toLowerCase();
+}
+
+module.exports = { REDIRECT_URI, providers, providerFor, canonicalProviderId };

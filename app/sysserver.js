@@ -53,13 +53,15 @@ const STATIC_FILES = {
   '/chatview-config.js': 'application/javascript; charset=utf-8',
   '/chatview-main.js': 'application/javascript; charset=utf-8',
   '/chatview-ptt.js': 'application/javascript; charset=utf-8',
+  '/office.js': 'application/javascript; charset=utf-8',
+  '/office.css': 'text/css; charset=utf-8',
   '/haschedule-ui.js': 'application/javascript; charset=utf-8',
   '/schedule.css': 'text/css; charset=utf-8',
   '/schedule-app.js': 'application/javascript; charset=utf-8',
 };
 
-let server = null, onMedia = null, onLaunch = null, getGridTiles = null, getAppConfig = null, getOAuthTokens = null, onOpenExternal = null, onMeetingAction = null;
-let sysHtml = FALLBACK, musicHtml = FALLBACK, chatHtml = FALLBACK, hascheduleHtml = FALLBACK, agendaHtml = FALLBACK, eventsHtml = FALLBACK, meetingHtml = FALLBACK;
+let server = null, onMedia = null, onLaunch = null, getGridTiles = null, getAppConfig = null, getOAuthTokens = null, connectOAuth = null, onOpenExternal = null, onMeetingAction = null;
+let sysHtml = FALLBACK, musicHtml = FALLBACK, chatHtml = FALLBACK, officeHtml = FALLBACK, hascheduleHtml = FALLBACK, agendaHtml = FALLBACK, eventsHtml = FALLBACK, meetingHtml = FALLBACK;
 const staticAssets = {};   // request path -> { body, type }; populated at start()
 let appFolders = {};        // drop-in served app id -> { root, proxy }; supplied by main.js
 const appServers = {};      // app id -> required server module
@@ -311,6 +313,7 @@ async function handler(req, res) {
   if (url === '/music') return html(res, musicHtml);
   if (url === '/meeting') return html(res, meetingHtml);
   if (url === '/chat') return html(res, chatHtml);
+  if (url === '/office') return html(res, officeHtml);
   if (url === '/haschedule') return html(res, hascheduleHtml);
   if (url === '/agenda') return html(res, agendaHtml);
   if (url === '/events') return html(res, eventsHtml);
@@ -333,11 +336,19 @@ async function handler(req, res) {
   }
   if (url === '/api/oauth-tokens.json') {
     const provider = queryValue(full, 'provider');
+    const scopes = queryValue(full, 'scopes');
     let tokens = null;
     if (provider && typeof getOAuthTokens === 'function') {
-      try { tokens = await getOAuthTokens(provider); } catch (e) { return json(res, { ok: false, error: e.message || 'oauth token lookup failed' }); }
+      try { tokens = await getOAuthTokens(provider, scopes); } catch (e) { return json(res, { ok: false, error: e.message || 'oauth token lookup failed', code: e.code || '', provider: e.provider || provider, scopes: e.scopes || [] }); }
     }
     return tokens ? json(res, Object.assign({ ok: true }, tokens)) : json(res, { ok: false, error: 'not connected' });
+  }
+  if (url === '/api/oauth-connect') {
+    const provider = queryValue(full, 'provider');
+    const scopes = queryValue(full, 'scopes');
+    if (!provider || typeof connectOAuth !== 'function') return done(res, false);
+    try { return json(res, await connectOAuth(provider, scopes)); }
+    catch (e) { return json(res, { ok: false, error: e.message || 'oauth connect failed' }); }
   }
   if (url === '/app-proxy') return serveAppProxy(req, res, full);
   if (url.indexOf('/app-api/') === 0) return serveAppApi(req, res, full, url);
@@ -387,6 +398,7 @@ function start(opts) {
   getGridTiles = opts.getGridTiles || null;
   getAppConfig = opts.getAppConfig || null;
   getOAuthTokens = opts.getOAuthTokens || null;
+  connectOAuth = opts.connectOAuth || null;
   onOpenExternal = opts.onOpenExternal || null;
   onMeetingAction = opts.onMeetingAction || null;
   setAppFolders(opts.appFolders);
@@ -397,6 +409,7 @@ function start(opts) {
     try { musicHtml = fs.readFileSync(path.join(__dirname, 'musicview.html'), 'utf8'); } catch (e) {}
     try { meetingHtml = fs.readFileSync(path.join(__dirname, 'meetingview.html'), 'utf8'); } catch (e) {}
     try { chatHtml = fs.readFileSync(path.join(__dirname, 'chatview.html'), 'utf8'); } catch (e) {}
+    try { officeHtml = fs.readFileSync(path.join(__dirname, 'office.html'), 'utf8'); } catch (e) {}
     try { hascheduleHtml = fs.readFileSync(path.join(__dirname, 'haschedule.html'), 'utf8'); } catch (e) {}
     try { agendaHtml = fs.readFileSync(path.join(__dirname, 'agenda.html'), 'utf8'); } catch (e) {}
     try { eventsHtml = fs.readFileSync(path.join(__dirname, 'events.html'), 'utf8'); } catch (e) {}
