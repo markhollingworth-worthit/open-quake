@@ -14,6 +14,9 @@ const http = require('http');
 const actionRunner = require('./actionRunner');
 const { createMediaKeys } = require('./mediaKeys');
 const { createSecretStore } = require('./secretStore');
+const { OAuthHandler } = require('../src/auth/oauth-handler');
+const { TokenStorage } = require('../src/auth/token-storage');
+const { providers: oauthProviders } = require('../src/auth/providers');
 const nowplaying = require('./nowplaying');   // same singleton sysserver polls — read its snapshot to target transport
 const haschedule = require('./haschedule');   // HA Schedule dev app — fed HA creds from .env, polled while shown
 const haClient = require('./haClient');       // Global HA cache (registries + dashboards); per-entity states fetched lazily
@@ -394,6 +397,8 @@ const secretStore = createSecretStore({
   loadApps,
   log: m => console.log(m),
 });
+const oauthStorage = new TokenStorage({ getConfig: () => config, saveConfig });
+const oauthHandler = new OAuthHandler({ storage: oauthStorage, openExternal: openExternalUrl, log: m => console.log(m) });
 
 // Build the file: URL for an app page, encoding its options as a #hash (file:// drops a ?query).
 function appOptionQuery(def, opts, include) {
@@ -469,6 +474,24 @@ function configureHaSchedule() {
   const ha = (config.settings && config.settings.haAuth) || {};
   haschedule.configure({ url: ha.url || '', token: ha.token || '' });
   return ha.url || '';
+}
+
+function oauthProviderPayload() {
+  return Object.keys(oauthProviders).map(id => {
+    const p = oauthProviders[id];
+    const settings = oauthStorage.getProviderSettings(id);
+    return Object.assign({}, oauthHandler.status(id), {
+      name: p.name,
+      scopes: p.scopes,
+      clientId: settings.clientId || '',
+      hasClientSecret: !!settings.clientSecret,
+      enabled: id === 'teams',
+    });
+  });
+}
+
+async function validOAuthTokens(provider) {
+  return oauthHandler.getValidTokens(provider);
 }
 async function pushToPanel() {
   if (panelWin && !panelWin.isDestroyed()) {
@@ -1354,7 +1377,7 @@ app.whenReady().then(async () => {
   // Lazy-required so a metrics/load failure can never crash the rest of the app.
   try {
     sysserver = require('./sysserver');
-    serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onAppLaunch, getGridTiles: getActiveAppTiles, getAppConfig: activeServedAppConfig, onOpenExternal: openExternalUrl, onMeetingAction: onMeetingActionRequest, appFolders: discoveredServedApps() });
+    serverPort = await sysserver.start({ onMedia: mediaKey, onLaunch: onAppLaunch, getGridTiles: getActiveAppTiles, getAppConfig: activeServedAppConfig, getOAuthTokens: validOAuthTokens, onOpenExternal: openExternalUrl, onMeetingAction: onMeetingActionRequest, appFolders: discoveredServedApps() });
     ensureSystemViewPage(serverPort); ensureMusicPage(); ensureDropInDir();
     const haUrl = configureHaSchedule();
     console.log('SystemView + Music on http://127.0.0.1:' + serverPort + (haUrl ? ' · HA Schedule -> ' + haUrl : ''));
@@ -1393,6 +1416,7 @@ app.whenReady().then(async () => {
   // future entity pickers) will see ok:false until this resolves; they can also kick a manual
   // refresh from the Auth tab. Skipped when Use HA is off or credentials are missing.
   if ((config.settings && config.settings.haAuth && config.settings.haAuth.useHa)) refreshHaCache();
+  oauthHandler.scheduleAll();
 
   ipcMain.on('launch', (e, a) => { if (!isFrom(e, panelWin)) return; runAction(a); });
   ipcMain.on('volume', (e, v) => { if (!isFrom(e, panelWin)) return; mediaKeys.volume(v); });
@@ -1420,6 +1444,29 @@ app.whenReady().then(async () => {
   });
   ipcMain.on('openExternal', (e, url) => { if (!isFrom(e, panelWin) && !isFrom(e, configWin)) return; openExternalUrl(url); });
   ipcMain.handle('getConfig', (e) => isFrom(e, configWin) ? config : null);
+  ipcMain.handle('listOAuthProviders', (e) => isFrom(e, configWin) ? oauthProviderPayload() : []);
+  ipcMain.handle('setOAuthProviderSettings', (e, provider, patch) => {
+    if (!isFrom(e, configWin)) return { ok: false, error: 'unauthorized' };
+    const safePatch = {};
+    if (patch && typeof patch.clientId === 'string') safePatch.clientId = patch.clientId.trim();
+    if (patch && typeof patch.clientSecret === 'string') safePatch.clientSecret = patch.clientSecret.trim();
+    try { oauthStorage.setProviderSettings(provider, safePatch); return { ok: true, providers: oauthProviderPayload() }; }
+    catch (err) { return { ok: false, error: err.message || String(err) }; }
+  });
+  ipcMain.handle('connectOAuthProvider', async (e, provider) => {
+    if (!isFrom(e, configWin)) return { ok: false, error: 'unauthorized' };
+    try { await oauthHandler.connect(provider); return { ok: true, providers: oauthProviderPayload() }; }
+    catch (err) { return { ok: false, error: err.message || String(err) }; }
+  });
+  ipcMain.handle('disconnectOAuthProvider', async (e, provider) => {
+    if (!isFrom(e, configWin)) return { ok: false, error: 'unauthorized' };
+    try { const r = await oauthHandler.revokeToken(provider); return Object.assign({}, r, { providers: oauthProviderPayload() }); }
+    catch (err) { return { ok: false, error: err.message || String(err) }; }
+  });
+  ipcMain.handle('get-oauth-tokens', (e, provider) => {
+    if (!isFrom(e, panelWin) && !isFrom(e, configWin)) return null;
+    return validOAuthTokens(provider).catch(err => ({ ok: false, error: err.message || String(err) }));
+  });
   // HA cache: editor reads the registries + dashboards for picker UIs; refresh kicks a new fetchAll.
   // fetchHaEntityState is wired now for phase-2 features that assign an entity to a button.
   ipcMain.handle('getHaCache', (e) => isFrom(e, configWin) ? haCache : null);
@@ -1438,6 +1485,11 @@ app.whenReady().then(async () => {
     if (!isFrom(e, configWin) || !newCfg || typeof newCfg !== 'object' || !Array.isArray(newCfg.grids)) return;
     const active = config.activeGridId;                          // the knob owns the live page — editor edits never change it
     const wasRot = rotationCfg().enabled;                        // detect a fresh off->on to auto-start (else keep the runtime pause)
+    const oauth = config.settings && config.settings.oauth;
+    if (oauth) {
+      if (!newCfg.settings) newCfg.settings = {};
+      newCfg.settings.oauth = oauth;
+    }
     config = newCfg;
     if (config.grids.some(g => g.id === active)) config.activeGridId = active;
     else if (!config.grids.some(g => g.id === config.activeGridId)) config.activeGridId = (config.grids[0] || {}).id || null;
@@ -1560,6 +1612,7 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {});
 app.on('before-quit', () => {
   try { dev.stop(); } catch (e) {}                       // close HID devices + clear keep-alive/rescan timers — an open node-hid handle blocks process exit (Cmd+Q would hang -> force-quit)
+  try { oauthHandler.stop(); } catch (e) {}              // stop OAuth callback server + background refresh timers
   try { if (sysserver) sysserver.stop(); } catch (e) {}  // stop metrics timers + close the local server
   try { if (dashSession) dashSession.cookies.flushStore(); } catch (e) {}   // commit a fresh webview login to disk before exit
   try { globalShortcut.unregisterAll(); } catch (e) {}   // drop per-page hotkeys

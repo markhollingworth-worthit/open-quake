@@ -1708,7 +1708,11 @@
         <input type="text" id="sHaUrl" value="${esc(ha.url || '')}" placeholder="http://homeassistant.local:8123" style="flex:1"></div>
       <div class="row"><label>Long-Lived Access Token</label>
         <input type="password" id="sHaToken" value="${esc(ha.token || '')}" placeholder="paste your long-lived access token" style="flex:1"></div>
-      <p class="hint">The token is stored encrypted at rest (same secret store as your dashboard tokens). It only leaves the main process for features that need it.</p>`;
+      <p class="hint">The token is stored encrypted at rest (same secret store as your dashboard tokens). It only leaves the main process for features that need it.</p>
+
+      <p class="sectitle" style="margin-top:22px">OAuth 2.0</p>
+      <p class="hint">Connect services once, then local apps can request fresh tokens through IPC or <code>/api/oauth-tokens.json?provider=teams</code>. Tokens are encrypted at rest and refreshed before expiry.</p>
+      <div id="sOauthList"><p class="hint">Loading OAuth providers...</p></div>`;
 
     // Drop-In Apps tab — manage user-installed app folders (import/export/delete) + storage location
     const diHtml = `
@@ -1876,6 +1880,75 @@
       document.getElementById('sHaUrl').oninput = e => saveHa({ url: e.target.value.trim() });
       document.getElementById('sHaToken').oninput = e => saveHa({ token: e.target.value.trim() });
       configApi.getHaCache().then(showStatus);   // initial status from whatever main has cached
+
+      let oauthPoll = null;
+      const oauthMsg = (id, text, bad) => {
+        const el = document.getElementById('oauthMsg_' + id);
+        if (el) { el.textContent = text || ''; el.style.color = bad ? '#c98' : '#7e93ab'; }
+      };
+      const fmtExpiry = ts => {
+        if (!ts) return 'not connected';
+        const mins = Math.round((Number(ts) - Date.now()) / 60000);
+        if (mins < 0) return 'expired';
+        if (mins < 60) return 'expires in ' + mins + ' min';
+        return 'expires in ' + Math.round(mins / 60) + ' h';
+      };
+      const renderOauth = async () => {
+        const host = document.getElementById('sOauthList'); if (!host) return;
+        let providers = [];
+        try { providers = await configApi.listOAuthProviders(); } catch (e) {}
+        if (!providers.length) { host.innerHTML = '<p class="hint">No OAuth providers available.</p>'; return; }
+        host.innerHTML = providers.map(p => `
+          <div class="advsec" style="margin-top:10px;padding:10px;border:1px solid #213145;border-radius:8px">
+            <div class="row" style="gap:8px;align-items:center">
+              <label style="width:auto;font-weight:bold">${esc(p.name || p.provider)}</label>
+              <span class="hint" style="margin:0">${p.connected ? 'Connected, ' + esc(fmtExpiry(p.expiresAt)) : (p.configured ? 'Ready to connect' : 'Client ID required')}</span>
+              <span id="oauthMsg_${esc(p.provider)}" class="hint" style="margin:0 0 0 auto"></span>
+            </div>
+            <div class="row"><label>Client ID</label>
+              <input type="text" class="oauthClientId" data-provider="${esc(p.provider)}" value="${esc(p.clientId || '')}" ${p.enabled ? '' : 'disabled'} placeholder="Azure app client ID" style="flex:1"></div>
+            <div class="row"><label>Scopes</label><span class="hint" style="margin:0">${esc((p.scopes || []).join(' '))}</span></div>
+            <div class="row" style="gap:8px">
+              <button class="oauthConnect" data-provider="${esc(p.provider)}" ${p.enabled ? '' : 'disabled'}>${p.connected ? 'Reconnect' : 'Connect'}</button>
+              <button class="oauthDisconnect danger" data-provider="${esc(p.provider)}" ${p.connected && p.enabled ? '' : 'disabled'}>Disconnect</button>
+              ${p.enabled ? '' : '<span class="hint" style="margin:0">Framework placeholder</span>'}
+            </div>
+          </div>`).join('');
+        host.querySelectorAll('.oauthClientId').forEach(inp => {
+          inp.onchange = async e => {
+            const id = e.currentTarget.dataset.provider;
+            oauthMsg(id, 'Saving...');
+            const r = await configApi.setOAuthProviderSettings(id, { clientId: e.currentTarget.value });
+            oauthMsg(id, r && r.ok ? 'Saved' : 'Save failed: ' + ((r && r.error) || ''), !(r && r.ok));
+          };
+        });
+        host.querySelectorAll('.oauthConnect').forEach(btn => {
+          btn.onclick = async e => {
+            const id = e.currentTarget.dataset.provider;
+            const input = host.querySelector('.oauthClientId[data-provider="' + id + '"]');
+            e.currentTarget.disabled = true;
+            oauthMsg(id, 'Opening browser...');
+            let r = await configApi.setOAuthProviderSettings(id, { clientId: input ? input.value : '' });
+            if (r && r.ok) r = await configApi.connectOAuthProvider(id);
+            oauthMsg(id, r && r.ok ? 'Finish sign-in in your browser.' : 'Connect failed: ' + ((r && r.error) || ''), !(r && r.ok));
+            e.currentTarget.disabled = false;
+            if (oauthPoll) clearInterval(oauthPoll);
+            let tries = 0;
+            oauthPoll = setInterval(() => { tries += 1; renderOauth(); if (tries >= 15) { clearInterval(oauthPoll); oauthPoll = null; } }, 2000);
+          };
+        });
+        host.querySelectorAll('.oauthDisconnect').forEach(btn => {
+          btn.onclick = async e => {
+            const id = e.currentTarget.dataset.provider;
+            if (!window.confirm('Disconnect ' + id + ' and remove stored OAuth tokens?')) return;
+            oauthMsg(id, 'Disconnecting...');
+            const r = await configApi.disconnectOAuthProvider(id);
+            oauthMsg(id, r && r.ok ? 'Disconnected' : 'Disconnect failed: ' + ((r && r.error) || ''), !(r && r.ok));
+            renderOauth();
+          };
+        });
+      };
+      renderOauth();
     }
 
     if (tab === 'software') {

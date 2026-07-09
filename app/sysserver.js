@@ -58,7 +58,7 @@ const STATIC_FILES = {
   '/schedule-app.js': 'application/javascript; charset=utf-8',
 };
 
-let server = null, onMedia = null, onLaunch = null, getGridTiles = null, getAppConfig = null, onOpenExternal = null, onMeetingAction = null;
+let server = null, onMedia = null, onLaunch = null, getGridTiles = null, getAppConfig = null, getOAuthTokens = null, onOpenExternal = null, onMeetingAction = null;
 let sysHtml = FALLBACK, musicHtml = FALLBACK, chatHtml = FALLBACK, hascheduleHtml = FALLBACK, agendaHtml = FALLBACK, eventsHtml = FALLBACK, meetingHtml = FALLBACK;
 const staticAssets = {};   // request path -> { body, type }; populated at start()
 let appFolders = {};        // drop-in served app id -> { root, proxy }; supplied by main.js
@@ -331,6 +331,14 @@ async function handler(req, res) {
     const cfg = appId && getAppConfig ? getAppConfig(appId) : null;
     return cfg ? json(res, cfg) : done(res, false);
   }
+  if (url === '/api/oauth-tokens.json') {
+    const provider = queryValue(full, 'provider');
+    let tokens = null;
+    if (provider && typeof getOAuthTokens === 'function') {
+      try { tokens = await getOAuthTokens(provider); } catch (e) { return json(res, { ok: false, error: e.message || 'oauth token lookup failed' }); }
+    }
+    return tokens ? json(res, Object.assign({ ok: true }, tokens)) : json(res, { ok: false, error: 'not connected' });
+  }
   if (url === '/app-proxy') return serveAppProxy(req, res, full);
   if (url.indexOf('/app-api/') === 0) return serveAppApi(req, res, full, url);
   if (url === '/metrics') return json(res, metrics.getSnapshot());
@@ -378,6 +386,7 @@ function start(opts) {
   onLaunch = opts.onLaunch || null;
   getGridTiles = opts.getGridTiles || null;
   getAppConfig = opts.getAppConfig || null;
+  getOAuthTokens = opts.getOAuthTokens || null;
   onOpenExternal = opts.onOpenExternal || null;
   onMeetingAction = opts.onMeetingAction || null;
   setAppFolders(opts.appFolders);

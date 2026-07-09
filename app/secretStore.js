@@ -18,6 +18,8 @@
 //   settings:
 //     settings.spotify.refreshToken                   (NOT settings.spotify.clientId — clientId is public)
 //     settings.haAuth.token                           (NOT settings.haAuth.url — the URL is not sensitive)
+//     settings.oauth.providers[*].clientSecret        (optional confidential OAuth clients)
+//     settings.oauth.tokens[*].accessToken / refreshToken
 const MARKER = 'oqenc:v1:';    // legacy: Electron safeStorage — still decrypted, never written on Windows
 const MARKER2 = 'oqenc:v2:';   // Windows: raw DPAPI per-value blobs (app/dpapi.js), no key file
 
@@ -100,6 +102,23 @@ function createSecretStore({ safeStorage, dpapi, loadApps, log = () => {} }) {
     const ha = config && config.settings && config.settings.haAuth;
     if (ha && typeof ha === 'object' && typeof ha.token === 'string' && ha.token !== '') {
       ha.token = fn(ha.token);
+    }
+    const oauth = config && config.settings && config.settings.oauth;
+    if (oauth && typeof oauth === 'object') {
+      const providers = oauth.providers && typeof oauth.providers === 'object' ? oauth.providers : {};
+      Object.keys(providers).forEach(id => {
+        const p = providers[id];
+        if (p && typeof p === 'object' && typeof p.clientSecret === 'string' && p.clientSecret !== '') {
+          p.clientSecret = fn(p.clientSecret);
+        }
+      });
+      const tokens = oauth.tokens && typeof oauth.tokens === 'object' ? oauth.tokens : {};
+      Object.keys(tokens).forEach(id => {
+        const t = tokens[id];
+        if (!t || typeof t !== 'object') return;
+        if (typeof t.accessToken === 'string' && t.accessToken !== '') t.accessToken = fn(t.accessToken);
+        if (typeof t.refreshToken === 'string' && t.refreshToken !== '') t.refreshToken = fn(t.refreshToken);
+      });
     }
   }
 
